@@ -48,4 +48,6 @@ void oset(struct outstream out);
 void oprintf(const char* format, ...);
 void oputs(const char* str);
 
+struct tm* SecondsSinceEpochToDateTime(struct tm* pTm, int64_t SecondsSinceEpoch);
+
 #endif /* HELPER_HPP_ */

@@ -25,6 +25,7 @@ void print_usage(const char* command);
 bool parse_command_line(int argc, char** argv);
 
 bool is_verbose();
+void set_verbose(bool verbose);
 bool is_remove_importflag();
 const char* get_input_filename();
 const char* get_item_dump_dir();

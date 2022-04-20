@@ -193,7 +193,9 @@ void PrintClassVar(struct DecompileInfo di) {
 
 void PrintVar(struct DecompileInfo di, datatype var_type, uint16_t remaining_operands) {
 	if (di.expression->XOperandCount < remaining_operands+1) {
-		throw new std::exception();
+		//throw new std::exception();
+		oputs("???");
+		return;
 	}
 	if (di.expression->XOperandCount == 1+remaining_operands
 			&& di.var_scope != varscope::STATIC_CLASS_VAR
@@ -231,7 +233,7 @@ void PrintVar(struct DecompileInfo di, datatype var_type, uint16_t remaining_ope
 			}
 		}
 	}else{
-		/// TODO: unsopported scope!!!
+		// unsopported scope
 		oprintf("sc%02x_",di.var_scope);
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), var_type));
 		for (uint8_t i=1; i+remaining_operands<di.expression->XOperandCount;i++) {
@@ -241,27 +243,34 @@ void PrintVar(struct DecompileInfo di, datatype var_type, uint16_t remaining_ope
 	}
 }
 
-void PrintDlgItem(struct DecompileInfo di, uint16_t remaining_operands) {
+void PrintDlgItem(struct DecompileInfo di, uint16_t remaining_operands, uint16_t offset = 0) {
 	if (di.expression->XOperandCount < remaining_operands+1) {
-		throw new std::exception();
+		//throw new std::exception();
+		oputs("???");
+		return;
 	}
 	uint32_t last_dlgitem = 0;
-	if (di.expression->XOperandCount == 1+remaining_operands) {
+	if (di.expression->XOperandCount == offset+1+remaining_operands) {
 		if (!CDlg::cur_dlg_item.empty()) {
 				last_dlgitem = CDlg::cur_dlg_item.top();
 			}
-	}else if (di.expression->XOperandCount == 2+remaining_operands) {
+	}else if (di.expression->XOperandCount == offset+2+remaining_operands) {
 		di.result_info = &last_dlgitem;
-		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), WINDOW_HANDLE));
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, offset), WINDOW_HANDLE));
 	}else{
-		throw std::exception();
+		//throw std::exception();
+		oputs("???");
+		return;
 	}
 
 	struct DecompileInfo d = adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-remaining_operands-1), DLGITEM);
 	uint32_t dlgitem = *(uint32_t*)(((uint8_t*)d.compile_block + d.expression->XBuffer));
+	if (dlgitem == 0xffffffff) {
+		return;
+	}
 	uint32_t item_ref = d.outline->get_dialog_dlgitem(last_dlgitem, dlgitem);
 	const char16_t* symbol = d.outline->symbol_lookup(item_ref);
-	if (di.expression->XOperandCount == 2+remaining_operands) {
+	if (di.expression->XOperandCount == offset+2+remaining_operands) {
 		oputs(".");
 	}
 	if (symbol) {
@@ -310,12 +319,12 @@ void Const(struct DecompileInfo di) {
 				print_date((struct SalNumber*)number);
 			}
 		}else{
-			// TODO: time only, date unset
-			oputs("[TIME:");
-			for (uint8_t i=0; i<0x19; i++) {
-				oprintf("%02x%s",number[i],(i<0x18)?" ":"");
+			// is only daytime without date
+			if (is_null((struct SalNumber*)number)) {
+				oputs("DATETIME_Null");
+			}else{
+				print_time((struct SalNumber*)number);
 			}
-			oputs("]");
 		}
 	}else if (di.expected_return_type == _BOOLEAN){
 		oputs(boolval((struct SalNumber*)((uint8_t*)di.compile_block + di.expression->XBuffer))?"TRUE":"FALSE");
@@ -332,7 +341,7 @@ void Const(struct DecompileInfo di) {
 		oputs("[const functional class object]");
 	}else if (di.expected_return_type == FILE_HANDLE){
 		oputs("[const functional file handle]");
-	}else if (di.expected_return_type == _HANDLE){
+	}else if (di.expected_return_type == _HANDLE || di.expected_return_type == UDV){
 		uint32_t data = *(uint32_t*)(((uint8_t*)di.compile_block + di.expression->XBuffer));
 		if (!data) {
 			oprintf("OBJ_Null");
@@ -391,7 +400,7 @@ void CnvStaticString(struct DecompileInfo di) {
 			&& di.expected_return_type != STRING
 			&& di.expected_return_type != LONG_STRING
 			&& di.expected_return_type != _BINARY) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	struct tagOPERATOR* data = ParseGetNthOperand(di.compile_block, di.expression, 0);
 	if (data->XOPType == 0x00) {
@@ -551,7 +560,7 @@ void ExtFunction(struct DecompileInfo di) {
 void Add(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY
 			&& di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 2) {
 		throw new std::exception();
@@ -567,7 +576,7 @@ void Add(struct DecompileInfo di) {
 
 void AddDate(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != DATETIME) {
-		throw std::exception();
+		//throw std::exception();
 	}
 	if (di.expression->XOperandCount != 2) {
 		throw new std::exception();
@@ -584,7 +593,7 @@ void AddDate(struct DecompileInfo di) {
 void Substract(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY
 			&& di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
-		throw std::exception();
+		//throw std::exception();
 	}
 	if (di.expression->XOperandCount != 2) {
 		throw new std::exception();
@@ -601,7 +610,7 @@ void Substract(struct DecompileInfo di) {
 
 void SubstractDate(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != DATETIME) {
-		throw std::exception();
+		//throw std::exception();
 	}
 	if (di.expression->XOperandCount != 2) {
 		throw new std::exception();
@@ -618,7 +627,7 @@ void SubstractDate(struct DecompileInfo di) {
 
 void SubstractDateDate(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
-		throw std::exception();
+		//throw std::exception();
 	}
 	if (di.expression->XOperandCount != 2) {
 		throw new std::exception();
@@ -635,7 +644,7 @@ void SubstractDateDate(struct DecompileInfo di) {
 
 void Multiply(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
-		throw std::exception();
+		//throw std::exception();
 	}
 	if (di.expression->XOperandCount != 2) {
 		throw new std::exception();
@@ -651,7 +660,7 @@ void Multiply(struct DecompileInfo di) {
 
 void Divide(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
-		throw std::exception();
+		//throw std::exception();
 	}
 	if (di.expression->XOperandCount != 2) {
 		throw new std::exception();
@@ -668,7 +677,7 @@ void Divide(struct DecompileInfo di) {
 
 void Negate(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
-		throw std::exception();
+		//throw std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -683,7 +692,7 @@ void Negate(struct DecompileInfo di) {
 
 void Or(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount < 2) {
 		throw new std::exception();
@@ -701,7 +710,7 @@ void Or(struct DecompileInfo di) {
 
 void And(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount < 2) {
 		throw new std::exception();
@@ -719,7 +728,7 @@ void And(struct DecompileInfo di) {
 
 void Not(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -734,7 +743,7 @@ void Not(struct DecompileInfo di) {
 
 void GenericCompare(struct DecompileInfo di, const char* comparator, uint8_t precedence, datatype types) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 2) {
 		throw new std::exception();
@@ -849,7 +858,7 @@ void Concat(struct DecompileInfo di) {
 			&& di.expected_return_type != STRING
 			&& di.expected_return_type != LONG_STRING
 			&& di.expected_return_type != _BINARY) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount < 2) {
 		throw new std::exception();
@@ -867,7 +876,7 @@ void Concat(struct DecompileInfo di) {
 
 void LAnd(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount < 2) {
 		throw new std::exception();
@@ -885,7 +894,7 @@ void LAnd(struct DecompileInfo di) {
 
 void LOr(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount < 2) {
 		throw new std::exception();
@@ -903,7 +912,7 @@ void LOr(struct DecompileInfo di) {
 
 void GetVarDate(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != DATETIME) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PrintVar(di,VARIABLE_DATE,0);
 }
@@ -947,21 +956,20 @@ void GetVarHandle(struct DecompileInfo di) {
 
 void GetVarNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PrintVar(di,VARIABLE_NUMBER,0);
 }
 
 void GetVarString(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != STRING && di.expected_return_type != LONG_STRING && di.expected_return_type != _BINARY) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PrintVar(di,VARIABLE_STRING,0);
 }
 
 void GetVarPointer(struct DecompileInfo di) {
 	/*
-	// TODO: which types??
 	if (di.expected_return_type != ANY && di.expected_return_type != ???) {
 		throw new std::exception();
 	}
@@ -971,7 +979,6 @@ void GetVarPointer(struct DecompileInfo di) {
 
 void GetVarAddress(struct DecompileInfo di) {
 	/*
-	// TODO: which types??
 	if (di.expected_return_type != ANY && di.expected_return_type != ???) {
 		throw new std::exception();
 	}
@@ -981,7 +988,7 @@ void GetVarAddress(struct DecompileInfo di) {
 
 void PutVarDate(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != DATETIME) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PRECEDENCE(PRECEDENCE_ASSIGN);
 	oputs(print_brackets?"(":"");
@@ -994,9 +1001,9 @@ void PutVarDate(struct DecompileInfo di) {
 }
 
 void PutVarHandle(struct DecompileInfo di) {
-	// TODO: what does it mean if expected_type is VARIABLE_HANDLE, i.e. if this function is nested
+	// what does it mean if expected_type is VARIABLE_HANDLE, i.e. if this function is nested
 	if (di.expected_return_type != ANY && di.expected_return_type != SQL_HANDLE && di.expected_return_type != FILE_HANDLE && di.expected_return_type != WINDOW_HANDLE && di.expected_return_type != SESSION_HANDLE && di.expected_return_type != FUNCTIONAL_CLASS_OBJECT && di.expected_return_type != VARIABLE_HANDLE) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PRECEDENCE(PRECEDENCE_ASSIGN);
 	oputs(print_brackets?"(":"");
@@ -1010,7 +1017,7 @@ void PutVarHandle(struct DecompileInfo di) {
 
 void PutVarNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PRECEDENCE(PRECEDENCE_ASSIGN);
 	oputs(print_brackets?"(":"");
@@ -1024,7 +1031,7 @@ void PutVarNumber(struct DecompileInfo di) {
 
 void PutVarString(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != STRING && di.expected_return_type != _BINARY) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PRECEDENCE(PRECEDENCE_ASSIGN);
 	oputs(print_brackets?"(":"");
@@ -1068,6 +1075,71 @@ void GetUDVHan(struct DecompileInfo di) {
 	return;
 }
 
+void New(struct DecompileInfo di) {
+	if (di.expression->XOperandCount == 1) {
+		struct tagOPERATOR* op = ParseGetNthOperand(di.compile_block, di.expression, 0);
+		uint32_t class_type = *(uint32_t*)(((uint8_t*)di.compile_block + op->XBuffer));
+		const char16_t* var_name = di.outline->symbol_lookup(class_type);
+		oputs("new ");
+		if (var_name) {
+			print_utf16(var_name);
+		}else{
+			oprintf("0x%08x",class_type);
+		}
+		return;
+	}
+	basic_operation("New",di);
+	return;
+}
+
+void IntConstructor(struct DecompileInfo di) {
+	if (di.expression->XOperandCount >= 2) {
+		// New statement
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ANY));
+
+		// reference to Constructor
+		struct tagOPERATOR* infun = ParseGetNthOperand(di.compile_block, di.expression, 1);
+		uint32_t func_item = *(uint32_t*)(((uint8_t*)di.compile_block + infun->XBuffer));
+
+		struct FuncParams p;
+		p.num = di.expression->XOperandCount - 2;
+		if (p.num) {
+			p.param = alloc<enum datatype*>(p.num * sizeof(enum datatype));
+		}else{
+			p.param = NULL;
+		}
+
+		// get constructor's function signature
+		if (func_item && p.param) {
+			const uint16_t type[] = {0x89, 0}; // Parameters (intern)
+			di.outline->find_children_of_type_and_run(callback1, &p, func_item, type);
+		}
+
+		// print arguments
+		oputs("(");
+		di.outer_precedence = PRECEDENCE_MAX;
+		for (uint8_t i=2; i<di.expression->XOperandCount; i++) {
+			datatype expected_return_type = datatype::ANY;
+			if (func_item && p.param && i-2 < p.num) {
+				expected_return_type = p.param[i-2];
+			}
+			decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, i), expected_return_type));
+			if (i+1<di.expression->XOperandCount) {
+				oputs(", ");
+			}
+		}
+		if (p.param) {
+			free(p.param);
+		}
+
+		oputs(")");
+		return;
+	}
+	basic_operation("IntConstructor",di);
+	return;
+}
+
+
 void PutUDVHan(struct DecompileInfo di) {
 	/*
 	if (di.expected_return_type != ANY && di.expected_return_type != UDV && di.expected_return_type != HANDLE) {
@@ -1082,6 +1154,27 @@ void PutUDVHan(struct DecompileInfo di) {
 	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-1), UDV));
 	oputs(print_brackets?")":"");
 	return;
+}
+
+void AdjUDVHan(struct DecompileInfo di) {
+	if (di.expression->XOperandCount == 2) {
+		uint32_t var_decl = 0;
+		di.result_info = &var_decl;
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), UDV));
+		uint32_t var_type = CItem::get_funcvar_typedef(di.outline, var_decl);
+		oputs(".");
+		struct tagOPERATOR* op = ParseGetNthOperand(di.compile_block, di.expression, 1);
+		uint32_t offset = *(uint32_t*)(((uint8_t*)di.compile_block + op->XBuffer));
+		uint32_t var_item = di.outline->lookup_variable(var_type, varscope::CURRENT_OBJECT, offset, 0);
+		const char16_t* var_name = di.outline->symbol_lookup(var_item);
+		if (var_name) {
+			print_utf16(var_name);
+		}else{
+			oprintf("0x%08x",offset);
+		}
+		return;
+	}
+	basic_operation("AdjUDVHan",di);
 }
 
 void MakeUDVRef(struct DecompileInfo di) {
@@ -1131,7 +1224,7 @@ void CnvUdvRefUDVREF(struct DecompileInfo di) {
 
 void MakeUDVRf(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != UDV && di.expected_return_type != _HANDLE) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount == 2) {
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _HANDLE));
@@ -1144,15 +1237,31 @@ void MakeUDVRf(struct DecompileInfo di) {
 		}
 		return;
 	}
+	if (di.expression->XOperandCount == 3) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _HANDLE));
+		if (is_verbose()) {
+			oputs(".[[");
+			decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ANY));
+			oputs(".");
+			decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ANY));
+			oputs("]]");
+		}
+		return;
+	}
 	basic_operation("MakeUDVRf",di);
 	return;
 }
 
 void CnvUDVToHandle(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != UDV && di.expected_return_type != _HANDLE) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), UDV));
+		return;
+	}
+	if (di.expression->XOperandCount == 2) {
+		// second parameter is data type
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), UDV));
 		return;
 	}
@@ -1160,9 +1269,18 @@ void CnvUDVToHandle(struct DecompileInfo di) {
 	return;
 }
 
+void PutReturnUDV(struct DecompileInfo di) {
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _HANDLE));
+		return;
+	}
+	basic_operation("PutReturnUDV",di);
+	return;
+}
+
 void IntFunSetupClassObject(struct DecompileInfo di) {
 	if (di.expected_return_type != INTFUNCLASS) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount == 3) {
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 2), SCOPE_REFERENCE)); // TODO: Handle type??
@@ -1174,8 +1292,43 @@ void IntFunSetupClassObject(struct DecompileInfo di) {
 		return;
 	}
 	//throw new std::exception();
-	//oputs("[[TODO: IntFunSetupClassObject doesn't have expected number of arguments...]]");
+	//oputs("[[IntFunSetupClassObject doesn't have expected number of arguments...]]");
 	basic_operation("IntFunSetupClassObject",di);
+	return;
+}
+
+void IntFunSetupClassIndirect(struct DecompileInfo di) {
+	if (di.expected_return_type != INTFUNCLASS) {
+		//throw new std::exception();
+	}
+
+	if (di.expression->XOperandCount == 5) {
+		PrintDlgItem(di, 2, 1);
+		oputs(".");
+		if (is_verbose()) {
+			oputs("[[");
+			decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 3), ANY));
+			oputs("]].");
+		}
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 4), SCOPE_REFERENCE));
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ITEM_REFERENCE));
+		return;
+	}
+	basic_operation("IntFunSetupClassIndirect",di);
+	return;
+}
+
+void IntFunSetupClassArray(struct DecompileInfo di) {
+	if (di.expected_return_type != INTFUNCLASS) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount == 4) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 1), ANY));
+		oputs(".");
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ITEM_REFERENCE));
+		return;
+	}
+	basic_operation("IntFunSetupClassArray",di);
 	return;
 }
 
@@ -1226,9 +1379,32 @@ void GethWndMDI(struct DecompileInfo di) {
 	return;
 }
 
+void GethWndForm(struct DecompileInfo di) {
+	// TODO: if called from PrintDlgItem,
+	// the current item shouldn't be printed
+	// - and PrintDlgItem shouldn't print the scope seperator "."
+	if (di.expected_return_type != WINDOW_HANDLE) {
+		// throw exception?
+	}
+	uint32_t item = 0;
+	if (!CDlg::cur_dlg_item.empty()) {
+		item = CDlg::cur_dlg_item.top();
+	}
+	const char16_t* name = di.outline->symbol_lookup(item);
+	if (name) {
+		print_utf16(name);
+	}else{
+		oprintf("0x%08x",item);
+	}
+	if (di.result_info) {
+		*di.result_info = item;
+	}
+	return;
+}
+
 void IntFunSetupIndirect(struct DecompileInfo di) {
 	if (di.expected_return_type != INTFUNCLASS) { /// expected return type by Function Return Value!!
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount == 2) {
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 1), WINDOW_HANDLE));
@@ -1242,9 +1418,17 @@ void IntFunSetupIndirect(struct DecompileInfo di) {
 
 void IntFunSetupLate(struct DecompileInfo di) {
 	if (di.expected_return_type != INTFUNCLASS) { /// expected return type by Function Return Value!!
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount == 1) {
+		oputs("..");
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ITEM_REFERENCE));
+		return;
+	}
+	if (di.expression->XOperandCount == 3) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 1), ANY));
+		oputs(".");
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 2), ITEM_REFERENCE));
 		oputs("..");
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ITEM_REFERENCE));
 		return;
@@ -1269,7 +1453,7 @@ void CnvHItemTaggedTEMPTAGGED(struct DecompileInfo di) {
 
 void CheckIndexList(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	di.outer_precedence = PRECEDENCE_MAX;
 	for (uint8_t i=0;i<di.expression->XOperandCount;i++) {
@@ -1286,7 +1470,7 @@ void GetArrayString(struct DecompileInfo di) {
 			&& di.expected_return_type != STRING
 			&& di.expected_return_type != LONG_STRING
 			&& di.expected_return_type != _BINARY) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PrintVar(di,VARIABLE_HANDLE,1);
 	oputs("[");
@@ -1297,7 +1481,7 @@ void GetArrayString(struct DecompileInfo di) {
 
 void GetArrayNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PrintVar(di,VARIABLE_HANDLE,1);
 	oputs("[");
@@ -1308,7 +1492,7 @@ void GetArrayNumber(struct DecompileInfo di) {
 
 void GetArrayDate(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != DATETIME) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PrintVar(di,VARIABLE_HANDLE,1);
 	oputs("[");
@@ -1327,7 +1511,7 @@ void GetArrayHandle(struct DecompileInfo di) {
 
 void PutArrayString(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != STRING && di.expected_return_type != _BINARY) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PRECEDENCE(PRECEDENCE_ASSIGN);
 	oputs(print_brackets?"(":"");
@@ -1343,7 +1527,7 @@ void PutArrayString(struct DecompileInfo di) {
 
 void PutArrayNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PRECEDENCE(PRECEDENCE_ASSIGN);
 	oputs(print_brackets?"(":"");
@@ -1357,9 +1541,22 @@ void PutArrayNumber(struct DecompileInfo di) {
 	oputs(print_brackets?")":"");
 }
 
+void CastUdv(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != UDV && di.expected_return_type != _HANDLE) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount == 2) {
+		// second parameter is data type
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), UDV));
+		return;
+	}
+	basic_operation("CastUdv",di);
+	return;
+}
+
 void PutArrayUDV(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _HANDLE && di.expected_return_type != UDV) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PRECEDENCE(PRECEDENCE_ASSIGN);
 	oputs(print_brackets?"(":"");
@@ -1375,7 +1572,7 @@ void PutArrayUDV(struct DecompileInfo di) {
 
 void GetArayUDV(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _HANDLE && di.expected_return_type != UDV) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PrintVar(di,VARIABLE_HANDLE,1);
 	oputs("[");
@@ -1386,7 +1583,7 @@ void GetArayUDV(struct DecompileInfo di) {
 
 void GetFieldNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount < 1) {
 		// FIXME: why does this occur?
@@ -1401,7 +1598,7 @@ void GetFieldString(struct DecompileInfo di) {
 			&& di.expected_return_type != STRING
 			&& di.expected_return_type != LONG_STRING
 			&& di.expected_return_type != _BINARY) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount < 1) {
 		// FIXME: why does this occur?
@@ -1413,7 +1610,7 @@ void GetFieldString(struct DecompileInfo di) {
 
 void GetFieldDate(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != DATETIME) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount < 1) {
 		// FIXME: why does this occur?
@@ -1439,7 +1636,7 @@ void GetFieldHandle(struct DecompileInfo di) {
 
 void PutFieldNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount == 0) {
 		throw new std::exception();
@@ -1463,7 +1660,7 @@ void PutFieldNumber(struct DecompileInfo di) {
 
 void PutFieldString(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != STRING) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount == 0) {
 		throw new std::exception();
@@ -1487,7 +1684,7 @@ void PutFieldString(struct DecompileInfo di) {
 
 void PutFieldDate(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != DATETIME) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount == 0) {
 		throw new std::exception();
@@ -1514,7 +1711,7 @@ void NoOp(struct DecompileInfo di) {
 
 void GetCheck(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount < 1) {
 		// FIXME: why does this occur?
@@ -1526,7 +1723,7 @@ void GetCheck(struct DecompileInfo di) {
 
 void PutCheck(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount == 0) {
 		throw new std::exception();
@@ -1550,7 +1747,7 @@ void PutCheck(struct DecompileInfo di) {
 
 void GetScroll(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount < 1) {
 		// FIXME: why does this occur?
@@ -1562,7 +1759,7 @@ void GetScroll(struct DecompileInfo di) {
 
 void PutScroll(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount == 0) {
 		throw new std::exception();
@@ -1586,7 +1783,7 @@ void PutScroll(struct DecompileInfo di) {
 
 void PutArrayDate(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != DATETIME) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PRECEDENCE(PRECEDENCE_ASSIGN);
 	oputs(print_brackets?"(":"");
@@ -1601,9 +1798,9 @@ void PutArrayDate(struct DecompileInfo di) {
 }
 
 void PutArrayHandle(struct DecompileInfo di) {
-	// TODO: what does it mean if expected_type is VARIABLE_HANDLE, i.e. if this function is nested
+	// what does it mean if expected_type is VARIABLE_HANDLE, i.e. if this function is nested
 	if (di.expected_return_type != ANY && di.expected_return_type != SQL_HANDLE && di.expected_return_type != FILE_HANDLE && di.expected_return_type != WINDOW_HANDLE && di.expected_return_type != SESSION_HANDLE && di.expected_return_type != FUNCTIONAL_CLASS_OBJECT && di.expected_return_type != VARIABLE_HANDLE) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	PRECEDENCE(PRECEDENCE_ASSIGN);
 	oputs(print_brackets?"(":"");
@@ -1619,12 +1816,22 @@ void PutArrayHandle(struct DecompileInfo di) {
 
 void CnvStringLPWSTR(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPWSTR) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
 	}
 	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), STRING));
+}
+
+void CnvRecStringLPWSTR(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != _LPWSTR) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount != 1) {
+		throw new std::exception();
+	}
+	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), RECEIVE_STRING));
 }
 
 void PutReturnNumber(struct DecompileInfo di) {
@@ -1661,7 +1868,7 @@ void PutReturnString(struct DecompileInfo di) {
 
 void CnvBooleanBOOL(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOL) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1671,7 +1878,7 @@ void CnvBooleanBOOL(struct DecompileInfo di) {
 
 void CnvDateTimeDATETIME(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != DATE_TIME) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1682,7 +1889,7 @@ void CnvDateTimeDATETIME(struct DecompileInfo di) {
 
 void CnvNumberBYTE(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BYTE) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1692,7 +1899,7 @@ void CnvNumberBYTE(struct DecompileInfo di) {
 
 void CnvNumberCHAR(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _CHAR) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1702,7 +1909,7 @@ void CnvNumberCHAR(struct DecompileInfo di) {
 
 void CnvNumberDOUBLE(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _DOUBLE) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1712,7 +1919,7 @@ void CnvNumberDOUBLE(struct DecompileInfo di) {
 
 void CnvNumberDWORD(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _DWORD) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1722,7 +1929,7 @@ void CnvNumberDWORD(struct DecompileInfo di) {
 
 void CnvNumberFLOAT(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _FLOAT) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1732,7 +1939,7 @@ void CnvNumberFLOAT(struct DecompileInfo di) {
 
 void CnvNumberINT(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _INT) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1742,7 +1949,7 @@ void CnvNumberINT(struct DecompileInfo di) {
 
 void CnvNumberLONG(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LONG) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1752,7 +1959,7 @@ void CnvNumberLONG(struct DecompileInfo di) {
 
 void CnvNumberNUMBER(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1762,7 +1969,7 @@ void CnvNumberNUMBER(struct DecompileInfo di) {
 
 void CnvNumberWORD(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _WORD) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1772,7 +1979,7 @@ void CnvNumberWORD(struct DecompileInfo di) {
 
 void CnvNumberWCHAR(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _WCHAR) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1782,7 +1989,7 @@ void CnvNumberWCHAR(struct DecompileInfo di) {
 
 void CnvBOOLBoolean(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1792,7 +1999,7 @@ void CnvBOOLBoolean(struct DecompileInfo di) {
 
 void CnvBYTENumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1802,7 +2009,7 @@ void CnvBYTENumber(struct DecompileInfo di) {
 
 void CnvWORDNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1812,7 +2019,7 @@ void CnvWORDNumber(struct DecompileInfo di) {
 
 void CnvDOUBLENumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1822,7 +2029,7 @@ void CnvDOUBLENumber(struct DecompileInfo di) {
 
 void CnvNUMBERNum(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1832,7 +2039,7 @@ void CnvNUMBERNum(struct DecompileInfo di) {
 
 void CnvFLOATNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1842,7 +2049,7 @@ void CnvFLOATNumber(struct DecompileInfo di) {
 
 void CnvLONGNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1852,7 +2059,7 @@ void CnvLONGNumber(struct DecompileInfo di) {
 
 void CnvDATETIMEDate(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != DATETIME) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1874,7 +2081,7 @@ void CnvHANDLEHan(struct DecompileInfo di) {
 
 void CnvINTNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1885,7 +2092,7 @@ void CnvINTNumber(struct DecompileInfo di) {
 
 void CnvCHARNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1895,7 +2102,7 @@ void CnvCHARNumber(struct DecompileInfo di) {
 
 void CnvDWORDNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1905,7 +2112,7 @@ void CnvDWORDNumber(struct DecompileInfo di) {
 
 void CnvSHORTNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1915,7 +2122,7 @@ void CnvSHORTNumber(struct DecompileInfo di) {
 
 void CnvWCHARNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1925,7 +2132,7 @@ void CnvWCHARNumber(struct DecompileInfo di) {
 
 void CnvLPSTRString(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != STRING) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1936,7 +2143,7 @@ void CnvLPSTRString(struct DecompileInfo di) {
 
 void CnvNumberSHORT(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _SHORT) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1946,7 +2153,7 @@ void CnvNumberSHORT(struct DecompileInfo di) {
 
 void CnvHandleHANDLE(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _HANDLE) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1956,7 +2163,7 @@ void CnvHandleHANDLE(struct DecompileInfo di) {
 
 void CnvRecBooleanLPBOOL(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPBOOL) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1966,7 +2173,7 @@ void CnvRecBooleanLPBOOL(struct DecompileInfo di) {
 
 void CnvRecDateTimeLPDATETIME(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != LPDATETIME) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1976,7 +2183,7 @@ void CnvRecDateTimeLPDATETIME(struct DecompileInfo di) {
 
 void CnvRecNumberLPBYTE(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPBYTE) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1986,7 +2193,7 @@ void CnvRecNumberLPBYTE(struct DecompileInfo di) {
 
 void CnvRecNumberLPCHAR(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPCHAR) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -1996,7 +2203,7 @@ void CnvRecNumberLPCHAR(struct DecompileInfo di) {
 
 void CnvRecNumberLPDOUBLE(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPDOUBLE) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2006,7 +2213,7 @@ void CnvRecNumberLPDOUBLE(struct DecompileInfo di) {
 
 void CnvRecNumberLPDWORD(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPDWORD) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2016,7 +2223,7 @@ void CnvRecNumberLPDWORD(struct DecompileInfo di) {
 
 void CnvRecNumberLPFLOAT(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPFLOAT) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2026,7 +2233,7 @@ void CnvRecNumberLPFLOAT(struct DecompileInfo di) {
 
 void CnvRecNumberLPINT(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPINT) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2036,7 +2243,7 @@ void CnvRecNumberLPINT(struct DecompileInfo di) {
 
 void CnvRecNumberLPLONG(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPLONG) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2046,7 +2253,7 @@ void CnvRecNumberLPLONG(struct DecompileInfo di) {
 
 void CnvRecNumberLPNUMBER(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != LPNUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2056,7 +2263,7 @@ void CnvRecNumberLPNUMBER(struct DecompileInfo di) {
 
 void CnvRecNumberLPWORD(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPWORD) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2066,7 +2273,7 @@ void CnvRecNumberLPWORD(struct DecompileInfo di) {
 
 void CnvRecStringHSTRING(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != HSTRING) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2076,7 +2283,7 @@ void CnvRecStringHSTRING(struct DecompileInfo di) {
 
 void CnvRecHandleLPHANDLE(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPHANDLE) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2086,7 +2293,7 @@ void CnvRecHandleLPHANDLE(struct DecompileInfo di) {
 
 void CnvRecStringLPSTR(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPSTR) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2096,7 +2303,7 @@ void CnvRecStringLPSTR(struct DecompileInfo di) {
 
 void CnvRecStringLPHSTRING(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != LPHSTRING) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2106,7 +2313,7 @@ void CnvRecStringLPHSTRING(struct DecompileInfo di) {
 
 void CnvRecStringLPVOID(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPVOID) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2116,7 +2323,7 @@ void CnvRecStringLPVOID(struct DecompileInfo di) {
 
 void CnvStringHSTRING(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != HSTRING && di.expected_return_type != HBINARY) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2130,7 +2337,7 @@ void CnvStringHSTRING(struct DecompileInfo di) {
 
 void CnvStringLPSTR(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPSTR) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2140,7 +2347,7 @@ void CnvStringLPSTR(struct DecompileInfo di) {
 
 void CnvStringLPVOID(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPVOID) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2150,7 +2357,7 @@ void CnvStringLPVOID(struct DecompileInfo di) {
 
 void CnvLPBOOLRecBoolean(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2160,7 +2367,7 @@ void CnvLPBOOLRecBoolean(struct DecompileInfo di) {
 
 void CnvLPDATETIMERectDateTime(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != DATETIME) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2170,7 +2377,7 @@ void CnvLPDATETIMERectDateTime(struct DecompileInfo di) {
 
 void CnvLPBYTERecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2180,7 +2387,7 @@ void CnvLPBYTERecNumber(struct DecompileInfo di) {
 
 void CnvLPCHARRecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2190,7 +2397,7 @@ void CnvLPCHARRecNumber(struct DecompileInfo di) {
 
 void CnvLPDOUBLERecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2200,7 +2407,7 @@ void CnvLPDOUBLERecNumber(struct DecompileInfo di) {
 
 void CnvLPDWORDRecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2210,7 +2417,7 @@ void CnvLPDWORDRecNumber(struct DecompileInfo di) {
 
 void CnvLPFLOATRecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2220,7 +2427,7 @@ void CnvLPFLOATRecNumber(struct DecompileInfo di) {
 
 void CnvLPINTRecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2230,7 +2437,7 @@ void CnvLPINTRecNumber(struct DecompileInfo di) {
 
 void CnvLPLONGRecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2240,7 +2447,7 @@ void CnvLPLONGRecNumber(struct DecompileInfo di) {
 
 void CnvLPNUMBERRecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2250,7 +2457,7 @@ void CnvLPNUMBERRecNumber(struct DecompileInfo di) {
 
 void CnvLPWORDRecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2263,7 +2470,7 @@ void CnvHSTRINGhString(struct DecompileInfo di) {
 			&& di.expected_return_type != STRING
 			&& di.expected_return_type != LONG_STRING
 			&& di.expected_return_type != _BINARY) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2280,7 +2487,7 @@ void CnvLPWSTRString(struct DecompileInfo di) {
 			&& di.expected_return_type != STRING
 			&& di.expected_return_type != LONG_STRING
 			&& di.expected_return_type != _BINARY) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2292,7 +2499,7 @@ void CastToUDV(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY
 			&& di.expected_return_type != UDV
 			&& di.expected_return_type != _HANDLE) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 2) {
 		throw new std::exception();
@@ -2310,7 +2517,7 @@ void CompareUDVNE(struct DecompileInfo di) {
 
 void CnvLPWSTRRecString(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != STRING) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2320,7 +2527,7 @@ void CnvLPWSTRRecString(struct DecompileInfo di) {
 
 void CnvRecStringLPASCSTR(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != LPASCSTR) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2330,7 +2537,7 @@ void CnvRecStringLPASCSTR(struct DecompileInfo di) {
 
 void CnvStringLPASCSTR(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != LPASCSTR) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2340,7 +2547,7 @@ void CnvStringLPASCSTR(struct DecompileInfo di) {
 
 void CnvToBoolean(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
-		throw new std::exception();
+		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
@@ -2394,10 +2601,21 @@ void ArrayObjectVar(struct DecompileInfo di) {
 		if (di.expression->XOperandCount == 4) {
 			oputs(" = ");
 			di.outer_precedence = PRECEDENCE_ASSIGN - 1;
-			// TODO: use variable type!!!
+			// TODO: pass variable type!!!
 			decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 3), ANY));
 			oputs(print_brackets?")":"");
 		}
+		return;
+	}
+	basic_operation("ArrayObjectVar", di);
+}
+
+void ArrayObjectAddress(struct DecompileInfo di) {
+	if (di.expression->XOperandCount == 3) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ANY));
+		oputs("[");
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 1), ANY));
+		oputs("]");
 		return;
 	}
 	basic_operation("ArrayObjectVar", di);
@@ -2554,13 +2772,13 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		IntFunSetupIndirect,
 		IntFunSetupLate,
 		__not_implemented_yet, // NULL
-		__not_implemented_yet, // IntFunSetupClassIndirect
-		__not_implemented_yet, // IntFunSetupClassArray
+		IntFunSetupClassIndirect,
+		IntFunSetupClassArray,
 		IntFunSetupClassObject,
 		GethWndMDI,
-		__not_implemented_yet, // GethWndForm
+		GethWndForm,
 		ArrayObjectVar,
-		__not_implemented_yet, // ArrayObjectAddress
+		ArrayObjectAddress,
 		__not_implemented_yet, // CnvUnlockUnRef
 		CnvToBoolean,
 		__not_implemented_yet, // IntFunSetupUDVRef
@@ -2583,15 +2801,15 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		CnvLPSTRString,
 		__not_implemented_yet, // CnvLPSHORTRecNumber
 		__not_implemented_yet, // CnvRecNumberLPSHORT
-		__not_implemented_yet, // New
+		New,
 		PutUDVHan,
 		GetUDVHan,
-		__not_implemented_yet, // AdjUDVHan
+		AdjUDVHan,
 		MakeUDVRf,
 		CnvUDVToHandle,
-		__not_implemented_yet, // PutReturnUDV
+		PutReturnUDV,
 		__not_implemented_yet, // NewExpr
-		__not_implemented_yet, // CastUdv
+		CastUdv,
 		PutArrayUDV,
 		GetArayUDV,
 		CompareUDVEQ,
@@ -2604,7 +2822,7 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		__not_implemented_yet, // GetUDVREF
 		__not_implemented_yet, // CnvExtUDVREF
 		CnvStringLPWSTR,
-		__not_implemented_yet, // CnvRecStringLPWSTR
+		CnvRecStringLPWSTR, // CnvRecStringLPWSTR
 		__not_implemented_yet, // CnvLPWSTRRecString
 		__not_implemented_yet, // CnvLPWSTRString
 		CnvNumberWCHAR,
@@ -2638,8 +2856,8 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		__not_implemented_yet, // CnvRecStringLPVOID
 		__not_implemented_yet, // CnvLPVOIDRecString
 		__not_implemented_yet, // CnvStringLPVOID
-		__not_implemented_yet, // New2
-		__not_implemented_yet, // IntConstructor
+		New, // New2 (for use with IntConstructor)
+		IntConstructor,
 		__not_implemented_yet, // Return
 		__not_implemented_yet, // CnvLONGLONGNumber
 		__not_implemented_yet, // CnvNumberLONGLONG

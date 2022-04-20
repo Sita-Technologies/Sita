@@ -93,6 +93,10 @@ bool is_verbose() {
 	return verbose;
 }
 
+void set_verbose(bool verbose) {
+	::verbose = verbose;
+}
+
 const char* get_input_filename() {
 	return input_fn;
 }

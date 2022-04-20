@@ -122,6 +122,10 @@ void sprint_date(char* str, const struct SalNumber* num) {
 	if (!str) {
 		return;
 	}
+	if (!num) {
+		sprintf(str,"DATETIME_Null");
+		return;
+	}
 
 	char buf[300];
 	sprint_number(buf,num);
@@ -135,7 +139,21 @@ void sprint_date(char* str, const struct SalNumber* num) {
 	time_t nowtime = seconds;
 	nowtm = gmtime(&nowtime);
 	char tmbuf[64];
+#if defined(_WIN32) || defined(WIN32) || defined(_WIN64) || defined(WIN64)
+	struct tm tmp = {0};
+	if (!nowtm) {
+		nowtm = &tmp;
+		SecondsSinceEpochToDateTime(nowtm, seconds);
+	}
+	if (nowtm->tm_year < 1600 || nowtm->tm_year > 8000) {
+		strcpy(tmbuf, "0000-00-00-00.00.00");
+	}
+	else {
+		strftime(tmbuf, sizeof tmbuf, "%Y-%m-%d-%H.%M.%S", nowtm);
+	}
+#else
 	strftime(tmbuf, sizeof tmbuf, "%Y-%m-%d-%H.%M.%S", nowtm);
+#endif
 	// compute micro seconds
 	uint32_t nano_x10 = (uint32_t)((stamp-(double)seconds)*10000000.0);
 	if (nano_x10%10>4) {
@@ -144,9 +162,36 @@ void sprint_date(char* str, const struct SalNumber* num) {
 	sprintf(str,"%s.%06u",tmbuf,nano_x10/10);
 }
 
+void sprint_time(char* str, const struct SalNumber* num) {
+	if (!str) {
+		return;
+	}
+	if (!num) {
+		sprintf(str,"DATETIME_Null");
+		return;
+	}
+	uint8_t sz = num->size;
+	SalNumber num2;
+	num2.size = (sz & 0xf);
+	memcpy(num2.payload, num->payload, num2.size);
+	char buf[256];
+	sprint_date(buf, &num2);
+	if (strlen(buf) > 11) {
+		strcpy(str,buf+11);
+	}else{
+		*str = 0;
+	}
+}
+
 void print_date(const struct SalNumber* num) {
 	char str[256];
 	sprint_date(str,num);
+	oputs(str);
+}
+
+void print_time(const struct SalNumber* num) {
+	char str[256];
+	sprint_time(str,num);
 	oputs(str);
 }
 

@@ -44,14 +44,13 @@
 // TODO: ext-fun-calls: dynamic calls as well as expected datatypes of parameters
 // TODO: improve support of variable scopes: 0x01 (when does it fail??), 0x02 (On ...), 0x04 (item.cpp: support more types in CObject::get_class), ...
 // TODO: find out in which cases these var scopes are used and support them: 0x06, 0x09, 0x0a, 0x0b, 0x0d (what about scope 0x0c? does it even exist?)
-// TODO: handle empty object-references in PutCheck, GetCheck, PutString, ..... --> direct reference to object containing the command
-// TODO: line-number in tagITEM-flag: deal with overflows ;; how to deal with MAC or LINUX linebreaks??
+// TODO: handle empty object-references in PutCheck, GetCheck, PutString, ..... --> direct reference to object containing the command???
 // TODO: item.cpp:CObject::get_class: play around with different object/class types since structure WINATTR is not understood yet
 // TODO: restore apl-files from .exe??
+// TODO: line-number in tagITEM-flag: deal with overflows ;; how to deal with MAC or LINUX linebreaks?
 // TODO: fix resource dumping;; output .app file, .apl files, and resources into one folder
 // TODO: external functions: datatypes (LPLONG, TEMPLATE, ...)
 // TODO: work on FIXMEs in all source files
-// TODO: replace exceptions on type-error by warnings (if -v flag is set) in decompile.cpp
 
 // beta version
 // TODO: test and support other versions than opentext Gupta Team Developer 7.2.0 // check "Outline Version" // what about string-encoding? is it always UTF-16?
@@ -117,21 +116,23 @@ void iterate_items(COutline& outline, uint32_t item, uint32_t indention, uint32_
 					tag_items[p_item->type]->preprocess(&outline,item,memory_item);
 				}
 
-				print_indent(indention);
-				if (is_verbose()) {
-					oprintf("%04x.%04x: ",item>>16,item&0xFFFF);
-					oprintf("[0x%04x]",p_item->type);
-					oprintf("(flgs:0x%08x)",p_item->flags);
+				if (!get_app_output_filename() || is_verbose()) {
+					print_indent(indention);
+					if (is_verbose()) {
+						oprintf("%04x.%04x: ",item>>16,item&0xFFFF);
+						oprintf("[0x%04x]",p_item->type);
+						oprintf("(flgs:0x%08x)",p_item->flags);
+					}
+					if (p_item->type >= TAG_ITEMS_AMOUNT) {
+						oputs("???");
+					}else{
+						tag_items[p_item->type]->print(&outline,item,memory_item);
+					}
+					if (p_item->flags & 0x1000) {
+						oputs(" !__Exported");
+					}
+					oputs("\n");
 				}
-				if (p_item->type >= TAG_ITEMS_AMOUNT) {
-					oputs("???");
-				}else{
-					tag_items[p_item->type]->print(&outline,item,memory_item);
-				}
-				if (p_item->flags & 0x1000) {
-					oputs(" !__Exported");
-				}
-				oputs("\n");
 
 				if (get_app_output_filename() && p_item->type < TAG_ITEMS_AMOUNT) {
 					tag_items[p_item->type]->decompile(&outline,item,memory_item);
@@ -139,8 +140,7 @@ void iterate_items(COutline& outline, uint32_t item, uint32_t indention, uint32_
 				}
 			}
 		}else{
-
-			if (is_verbose() && !first_pass) {
+			if (is_verbose() && !first_pass && !get_app_output_filename()) {
 				print_indent(indention);
 				oprintf("%04x.%04x: ",item>>16,item&0xFFFF);
 				oprintf("[0x%04x]",p_item->type);
@@ -241,13 +241,13 @@ int main(int argc, char** argv) {
 	COutline outline(td);
 
 
-	if (is_verbose()) {
-		oprintf("Information about %s:\n",argv[argc-1]);
-		outline.print_stats();
-	}
 	if (outline.get_file_hdr().flags & FLAG_IS_64BIT) {
 		fprintf(stderr,"error: 64bit binaries are not supported\n");
 		exit(1); // 64bit not supported
+	}
+	if (is_verbose()) {
+		oprintf("Information about %s:\n",argv[argc-1]);
+		outline.print_stats();
 	}
 	iterate_items(outline,outline.top_item(),0,NULL, true);
 	iterate_items(outline,outline.top_item(),0,NULL);
@@ -273,6 +273,7 @@ int main(int argc, char** argv) {
 		}
 		outline.save(app_output);
 		fclose(app_output);
+		printf("decompiled app written to %s\n",get_app_output_filename());
 	}
 	return 0;
 }

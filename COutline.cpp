@@ -35,28 +35,6 @@
 #error "neither Unix nor Windows environment defined"
 #endif
 
-#define READ_MAP NULL
-FILE* access_log_handle;
-void log_access(FILE* f, size_t start, size_t len) {
-	if (!f) {
-		return;
-	}
-	fseek(f, (long)start, SEEK_SET);
-	unsigned char b = 0xFF;
-	for (size_t i=0;i<len;i++) {
-		fwrite(&b,1,1,f);
-	}
-}
-void log_access(FILE* f, size_t len) {
-	if (!f) {
-		return;
-	}
-	unsigned char b = 0xFF;
-	for (size_t i=0;i<len;i++) {
-		fwrite(&b,1,1,f);
-	}
-}
-
 uint32_t COutline::insert_item(uint16_t seginf) {
 	if (!seginf) {
 		return 0;
@@ -87,32 +65,30 @@ COutline::COutline(FILE* handle) : handle(handle) {
 	}
 	long int offset = 0;
 
-
-	if (READ_MAP) {
-		::access_log_handle = fopen(READ_MAP,"wb+");
-	}else{
-		::access_log_handle = NULL;
-	}
-
 	// search for MAGIC BYTE sequence and read header
 	/**
-	 * Skipped data in PE file should only be:
+	 * Skipped data in PE file should only contain:
 	 * * Manifest
 	 * * App Icon
 	 * * Version Information
 	 * * DLL dependencies
 	 * * Machine code that calls cdlliXX.dll, which then runs the Outline
 	 */
-	while (true) {
-		fseek_or_throw(handle, offset);
-		fread_or_throw(&this->file_hdr, sizeof(struct FileHdr), handle);
-		if (this->file_hdr.signature == TD_SIGNATURE) {
-			break;
+	try {
+		while (true) {
+			fseek_or_throw(handle, offset);
+			fread_or_throw(&this->file_hdr, sizeof(struct FileHdr), handle);
+			if (this->file_hdr.signature == TD_SIGNATURE) {
+				break;
+			}
+			offset += 0x200;
+			continue;
 		}
-		offset += 0x200;
-		continue;
+	}catch(...){
+		fprintf(stderr,"error: did not find magic bytes while scanning the input file\n");
+		fprintf(stderr,"maybe not a Gupta Team Developer binary?\n");
+		exit(1);
 	}
-	log_access(::access_log_handle,0,offset+sizeof(struct FileHdr));
 
 	if (is_verbose()) {
 		printf("Offset: 0x%08lx\n",offset);
@@ -121,7 +97,6 @@ COutline::COutline(FILE* handle) : handle(handle) {
 	// read outline
 	this->outline = alloc<struct Outline*>(this->file_hdr.outline_alloc);
 	fread_or_throw(this->outline, this->file_hdr.outline_alloc, handle);
-	log_access(::access_log_handle,this->file_hdr.outline_alloc);
 	if (this->outline->outline_alloc != this->file_hdr.outline_alloc) {
 		fprintf(stderr,"warning: size mismatch of outline structure\n");
 	}
@@ -129,14 +104,12 @@ COutline::COutline(FILE* handle) : handle(handle) {
 
 	// read symbol hash table
 	fread_or_throw(&this->symbol_hash, sizeof(SymbolHash), handle);
-	log_access(::access_log_handle,sizeof(SymbolHash));
 
 	// read list of forms/Windows that should be loaded on startup
 	if (this->file_hdr.run_only == RUN_ONLY) {
 		uint32_t form_item;
 		do {
 			fread_or_throw(&form_item, 4, handle);
-			log_access(::access_log_handle,4);
 			/*
 			if (form_item) {
 				// TODO: store list of active windows somewhere...?
@@ -152,7 +125,6 @@ COutline::COutline(FILE* handle) : handle(handle) {
 		this->ax_lib_info = alloc<char*>(this->file_hdr.ax_lib_info_len);
 		fseek_or_throw(handle,offset+this->file_hdr.ax_lib_info_offset);
 		fread_or_throw(this->ax_lib_info, this->file_hdr.ax_lib_info_len, handle);
-		log_access(::access_log_handle,offset+this->file_hdr.ax_lib_info_offset,this->file_hdr.ax_lib_info_len);
 	}
 
 	// read CClassRelationships [see cdlli72.dll:0x1040a3d3]
@@ -162,7 +134,6 @@ COutline::COutline(FILE* handle) : handle(handle) {
 		this->class_relationships = alloc<char*>(this->file_hdr.class_relationship_length);
 		fseek_or_throw(handle,offset+this->file_hdr.class_relationship_offset);
 		fread_or_throw(this->class_relationships, this->file_hdr.class_relationship_length, handle);
-		log_access(::access_log_handle,offset+this->file_hdr.class_relationship_offset,this->file_hdr.class_relationship_length);
 	}
 
 	// read co_class_list (seems only to be present if "RUNO" flag is set)
@@ -170,7 +141,6 @@ COutline::COutline(FILE* handle) : handle(handle) {
 		this->co_class_list = alloc<char*>(this->file_hdr.co_class_list_len);
 		fseek_or_throw(handle,offset+this->file_hdr.co_class_list_offset);
 		fread_or_throw(this->co_class_list, this->file_hdr.co_class_list_len, handle);
-		log_access(::access_log_handle,offset+this->file_hdr.co_class_list_offset,this->file_hdr.co_class_list_len);
 	}
 
 	if (is_verbose()) {
@@ -207,7 +177,6 @@ COutline::COutline(FILE* handle) : handle(handle) {
 
 		this->tag_oseg[item_id] = alloc<struct tagOSEG*>(item->size);
 		fseek_or_throw(handle,offset+item->offset);
-		log_access(::access_log_handle,offset+item->offset,0);
 
 		if (is_verbose()) {
 			oprintf("item 0x%04x: size %u, flags 0x%08x\n",item_id,item->size,item->flags);
@@ -302,7 +271,6 @@ COutline::COutline(FILE* handle) : handle(handle) {
 	if (this->outline->h_string_tables) {
 		fseek_or_throw(handle,offset+this->outline->h_string_tables);
 		fread_or_throw(&this->cmphdr, sizeof(struct CompressionHeader), handle);
-		log_access(::access_log_handle,offset+this->outline->h_string_tables,sizeof(struct CompressionHeader));
 		if (this->cmphdr.uncomp_size != 0) {
 			this->str_data = alloc<char*>(this->cmphdr.uncomp_size);
 			this->OsReadFast(this->cmphdr.uncomp_size, str_data);
@@ -324,16 +292,6 @@ COutline::COutline(FILE* handle) : handle(handle) {
 				// TODO: check if item->size is large enough to hold all references...
 				uint8_t* data = (uint8_t*)this->tag_oseg[this->outline->hResInfo];
 				struct ResInfo* info = (struct ResInfo*)&data[sizeof(struct tagOSEG)];
-				//struct ResItemStruct* ritem_chain = (struct ResItemStruct*)&data[sizeof(struct tagOSEG)+sizeof(ResInfo)];
-				//struct ResPointerList* p_list = NULL;
-				//for (ResItemStruct* it = ritem_chain; it->size; it = (ResItemStruct*)((uint8_t*)it + ritem_chain->size)) {
-				//if (it->id == 0x00) {
-				//p_list = (struct ResPointerList*)&it->data;
-				//}
-				//}
-				//if (!p_list) {
-				//fprintf(stderr,"error: cannot find pointer list in hResInfo item\n");
-				//}else
 				for (int i=0; i<30; i++) {
 					uint16_t it = info->res_hash_names[i];
 					while (it) {
@@ -463,11 +421,6 @@ COutline::COutline(FILE* handle) : handle(handle) {
 		if (is_verbose()) {
 			oputs("\n");
 		}
-	}
-
-
-	if (::access_log_handle) {
-		fclose(::access_log_handle);
 	}
 }
 
@@ -1160,20 +1113,8 @@ long COutline::OsReadFast(unsigned long uncomp_size, char* decompressed) {
 	int success = 0;
 	if (uncomp_size > 0) {
 		unsigned long comp_size = 0;
-		log_access(::access_log_handle,4);
 		if (fread(&comp_size, 4, 1, handle)==1) {
-			/*
-			if(DEBUG) {
-				printf("comp_size: %lu\n",comp_size);
-				printf("uncomp_size: %lu\n",uncomp_size);
-			}
-			 */
 			unsigned long dec_len = this->OsDeCompress(-1, decompressed, comp_size);
-			/*
-			if (DEBUG) {
-				printf("dec_len: %lu\n",dec_len);
-			}
-			 */
 			if (dec_len == uncomp_size) {
 				success = 1;
 			}
@@ -1211,7 +1152,6 @@ unsigned long COutline::OsDeCompress(unsigned long expected_output_len, void* de
 	}
 	memset(buffer,0x20,0x8000);
 	while (remaining_input_len != 0) {
-		log_access(::access_log_handle,1);
 		IN_BYTE(cntrl)
 		for (unsigned long i=0; i<8; i++) {
 			if ((cntrl & (1 << i)) == 0) {
@@ -1219,7 +1159,6 @@ unsigned long COutline::OsDeCompress(unsigned long expected_output_len, void* de
 				if (remaining_input_len == 0) {
 					return cur_output_len;
 				}
-				log_access(::access_log_handle,1);
 				IN_BYTE(tmp)
 				// store in lookup table
 				buffer[(unsigned long)old_old_payload << 7 ^ (unsigned long)old_payload] = tmp;
@@ -1251,8 +1190,6 @@ struct HandTable* COutline::create_handtable(struct tagOSEG* item_content, uint3
 	HItem* item = &this->outline->data[item_id-1];
 	struct HandTable* hand_table;
 	hand_table = alloc<struct HandTable*>((item_content->seghd_maxUsedHandle+1) * sizeof(struct HandTable));
-	//uint32_t i=0;
-	//uint32_t j=0;
 
 	// extract sub-handles of item!!
 	uint32_t offset = item_content->seghd_shStartDynamic;
@@ -1280,12 +1217,10 @@ struct HandTable* COutline::create_handtable(struct tagOSEG* item_content, uint3
 					// hand_table[iterator->handle_id].handle_data = (struct tagITEM*)iterator->data;
 					hand_table[iterator->handle_id].size = iterator->value;
 					hand_table[iterator->handle_id].memory = alloc<struct RuntimeMemory*>(sizeof(struct RuntimeMemory));
-					//i++;
 				} /* else{
 					// TODO: unsupported data type...???
 					// empty?? reserved??
 					//fprintf(stderr,"info: item 0x%04x: unsupported flag 0x00 in HandMapItem.size field (size: 0x%04x, handle_id: 0x%04x, offset: 0x%04x)\n",item_id,iterator->size,iterator->handle_id,offset);
-					j++;
 				} */
 			}else{
 				fprintf(stderr,"item 0x%04x: invalid handle id: %u (must be between 1 and %u)",item_id,iterator->handle_id,item_content->seghd_maxUsedHandle);
@@ -1300,11 +1235,6 @@ struct HandTable* COutline::create_handtable(struct tagOSEG* item_content, uint3
 		}
 	}
 	// last item of (size&0x3fff) == 0x00 seems always to be followed by: 0x83 0x7f 0x00 0x00 -- why??
-	/*// counters don't seem to match...
-	if (i != item_content->ohItemCount && i+j != item_content->ohItemCount) {
-		fprintf(stderr,"warning: item-id 0x%04x: contains %u+%u items, but tagOSEG.ohItemCount is %u\n",item_id,i,j,item_content->ohItemCount);
-	}
-	*/
 	return hand_table;
 }
 
