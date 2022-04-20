@@ -68,6 +68,7 @@ public:
 	static void remove_itembody(class COutline* outline, uint32_t item_id, uint8_t itembody_type);
 	static void itembody_add_string(class COutline* outline, uint32_t item_id, const char* str);
 	static struct ItemBody* get_itembody(class COutline* outline, uint32_t item_id, uint16_t type);
+	static uint32_t get_funcvar_typedef(class COutline* outline, uint32_t item_id);
 
 	/**
 	 * name: name of item type

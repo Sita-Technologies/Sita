@@ -26,6 +26,8 @@ void sprint_number(char* out, const struct SalNumber* num);
 void print_number(const struct SalNumber* num);
 void sprint_date(char* out, const struct SalNumber* num);
 void print_date(const struct SalNumber* num);
+void sprint_time(char* out, const struct SalNumber* num);
+void print_time(const struct SalNumber* num);
 uint8_t is_zero_or_null(const struct SalNumber* num);
 bool boolval(const struct SalNumber* num);
 void sprint_bool(char* str, const struct SalNumber* num);

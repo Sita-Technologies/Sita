@@ -442,6 +442,9 @@ void CItem::decompile(class COutline* outline, uint32_t item_id, uint32_t* memor
 			out.pos = 0;
 			out.buf = &out_ptr;
 			oset(out);
+			bool verbose_tmp = is_verbose();
+			set_verbose(false);
+
 
 			this->print(outline,item_id,memory_item);
 			if (out_ptr) {
@@ -455,6 +458,7 @@ void CItem::decompile(class COutline* outline, uint32_t item_id, uint32_t* memor
 				itembody_add_string(outline,item_id,str);
 			}
 
+			set_verbose(verbose_tmp);
 			out.buf = 0;
 			out.f = stdout;
 			out.pos = 0;
@@ -642,10 +646,18 @@ public:
 	}
 
 	virtual ~COutlineVersion() {
-		CItem::~CItem();
 	}
 };
 
+uint32_t CItem::get_funcvar_typedef(class COutline* outline, uint32_t item_id) {
+	struct ItemBody* item_body = CItem::get_itembody(outline, item_id, 0x14);
+	if (item_body && item_body->size >= 7) {
+		if (item_body->data[0] == 0x05) {
+			return *(uint32_t*)&item_body->data[4];
+		}
+	}
+	return 0;
+}
 
 class CFunctionalVar : public CItem {
 
@@ -654,27 +666,22 @@ public:
 	}
 	virtual void print(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
 		bool printed = false;
-		struct ItemBody* item_body = get_itembody(outline, item_id, 0x14);
-		if (item_body) {
-			if (item_body->data[0] != 0x05) {
-				// ?
-			}
-			if (item_body->data[0] == 0x05) {
-				const char16_t* name = outline->symbol_lookup(*(uint32_t*)&item_body->data[4]);
-				if (!name) {
-					struct ItemBody* itb = get_itembody(outline, *(uint32_t*)&item_body->data[4], 0x01);
-					if (itb) {
-						name = (const char16_t*)itb->data;
-					}
+		uint32_t typedef_at = get_funcvar_typedef(outline, item_id);
+		if (typedef_at) {
+			const char16_t* name = outline->symbol_lookup(typedef_at);
+			if (!name) {
+				struct ItemBody* itb = get_itembody(outline, typedef_at, 0x01);
+				if (itb) {
+					name = (const char16_t*)itb->data;
 				}
-				if (name) {
-					print_utf16(name);
-					oputs(":");
-				}else{
-					oprintf("FunctionalVar_0x%08x:",*(uint32_t*)&item_body->data[4]);
-				}
-				printed = true;
 			}
+			if (name) {
+				print_utf16(name);
+				oputs(":");
+			}else{
+				oprintf("FunctionalVar_0x%08x:",typedef_at);
+			}
+			printed = true;
 		}
 
 		if (!printed) {
@@ -699,7 +706,6 @@ public:
 		}
 	}
 	virtual ~CFunctionalVar() {
-		CItem::~CItem();
 	}
 };
 
@@ -745,7 +751,6 @@ public:
 
 	}
 	virtual ~CStatement() {
-		CItem::~CItem();
 	}
 };
 
@@ -773,7 +778,6 @@ public:
 	}
 
 	virtual ~CLoop() {
-		CItem::~CItem();
 	}
 };
 
@@ -826,7 +830,6 @@ public:
 	}
 
 	virtual ~CBreak() {
-		CItem::~CItem();
 	}
 };
 
@@ -851,7 +854,6 @@ public:
 	}
 
 	virtual ~CCase() {
-		CItem::~CItem();
 	}
 };
 
@@ -931,7 +933,6 @@ public:
 		CItem::print_array_boundaries(outline, item_id);
 	}
 	virtual ~CVar() {
-		CItem::~CItem();
 	}
 };
 
@@ -960,7 +961,6 @@ public:
 	}
 
 	virtual ~CNumber() {
-		CItem::~CItem();
 	}
 };
 
@@ -989,7 +989,6 @@ public:
 	}
 
 	virtual ~CDateTime() {
-		CItem::~CItem();
 	}
 };
 
@@ -1017,7 +1016,6 @@ public:
 	}
 
 	virtual ~CBoolean() {
-		CItem::~CItem();
 	}
 };
 
@@ -1075,7 +1073,6 @@ public:
 	}
 
 	virtual ~CString() {
-		CItem::~CItem();
 	}
 };
 
@@ -1106,7 +1103,6 @@ public:
 		}
 	}
 	virtual ~COn() {
-		CVarScope::~CVarScope();
 	}
 
 	void decompile(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
@@ -1160,7 +1156,6 @@ public:
 	}
 
 	virtual ~CClassDefinitions() {
-		CItem::~CItem();
 	}
 };
 
@@ -1196,7 +1191,6 @@ void CGlobalDecs::preprocess(class COutline* outline, uint32_t item_id, uint32_t
 }
 
 CGlobalDecs::~CGlobalDecs() {
-	CItem::~CItem();
 }
 
 
@@ -1241,8 +1235,8 @@ void CVarScope::postprocess(class COutline* outline, uint32_t item_id, uint32_t*
 	}
 	*/
 }
+
 CVarScope::~CVarScope() {
-	CItem::~CItem();
 }
 
 
@@ -1292,7 +1286,6 @@ void CClass::preprocess(class COutline* outline, uint32_t item_id, uint32_t* mem
 }
 
 CClass::~CClass() {
-	CVarScope::~CVarScope();
 }
 
 CObject::CObject (const char* str) : CClass(str) {
@@ -1382,7 +1375,6 @@ void CObject::print(class COutline* outline, uint32_t item_id, uint32_t* memory_
 }
 
 CObject::~CObject() {
-	CClass::~CClass();
 }
 
 struct MatchItemsToScope SCOPE_FUNCTION[] = {
@@ -1449,7 +1441,6 @@ void CDlg::postprocess(class COutline* outline, uint32_t item_id, uint32_t* memo
 }
 
 CDlg::~CDlg() {
-	CObject::~CObject();
 }
 
 
@@ -1700,8 +1691,8 @@ CItem* tag_items[TAG_ITEMS_AMOUNT] = {
 		new CItem("Derived From"),
 		new CClassDefinitions("Class Definitions"),
 		new CClass("Functional Class:"),
-		new CClass("Dialog Box Class:"),
-		new CClass("Form Window Class:"),
+		new CDlg("Dialog Box Class:"),
+		new CDlg("Form Window Class:"),
 		new CClass("Table Window Class:"),
 		new CClass("Child Table Class:"),
 		new CClass("Data Field Class:"),
