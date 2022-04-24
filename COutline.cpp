@@ -161,6 +161,7 @@ COutline::COutline(FILE* handle) : handle(handle) {
 	if (is_verbose()) {
 		oputs("===== HITEMS =====\n");
 	}
+	uint32_t items_dumped = 0;
 	for (
 			struct HItem* item = this->outline->data;
 			(char*)item + sizeof(struct HItem) - (char*)this->outline <= this->outline->outline_alloc
@@ -233,6 +234,7 @@ COutline::COutline(FILE* handle) : handle(handle) {
 				sprintf(fn,"%s%sitem_%04x.bin",get_item_dump_dir(),slash,item_id);
 				FILE* fh = fopen(fn,"wb");
 				if (fh) {
+					items_dumped++;
 					fwrite(this->tag_oseg[item_id],item->size,1,fh);
 					fclose(fh);
 				}else{
@@ -254,6 +256,7 @@ COutline::COutline(FILE* handle) : handle(handle) {
 			sprintf(fn,"%s%sresource_%04x.bin",get_item_dump_dir(),slash,item_id);
 			FILE* res = fopen(fn,"wb");
 			if (res) {
+				items_dumped++;
 				fwrite(this->tag_oseg[item_id], item->size, 1, res);
 				fclose(res);
 			}else{
@@ -263,6 +266,10 @@ COutline::COutline(FILE* handle) : handle(handle) {
 		}
 
 		item_id++;
+	}
+
+	if (get_item_dump_dir()) {
+		printf("%u item%s dumped into directory %s\n",items_dumped,items_dumped==1?"":"s",get_item_dump_dir());
 	}
 
 	this->init_symbol_lookup();
@@ -279,6 +286,7 @@ COutline::COutline(FILE* handle) : handle(handle) {
 	}
 
 	if (is_verbose() || get_resource_dump_dir()) {
+		uint32_t resources_dumped = 0;
 		if (this->outline->hResInfo) {
 			if (is_verbose()) {
 				oputs("\n===== RESOURCES =====\n");
@@ -389,16 +397,23 @@ COutline::COutline(FILE* handle) : handle(handle) {
 											iconv(str_convert, (char**)&fn, &filename_len, &out_buffer, &max_out_len);
 											iconv_close(str_convert);
 #else
-											max_out_len = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWCH)fn, (int)filename_len, out_buffer, (int)max_out_len, NULL, NULL);
-											out_buffer += max_out_len;
+											out_buffer += WideCharToMultiByte(CP_ACP, 0, (LPCWCH)fn, (int)filename_len/2, out_buffer, (int)max_out_len, NULL, NULL);
 #endif
 											*out_buffer = 0;
 										}else{
 											resfilename = alloc<char*>(path_len+22);
 											sprintf(resfilename,"%s%sresource_%04x%04x.bin", get_resource_dump_dir(), slash, resseg, rn->hResHdr);
 										}
+										if (is_verbose()) {
+											FILE* resfile = fopen(resfilename,"rb");
+											if (resfile) {
+												fprintf(stderr,"dumping resource %04x%04x to file %s: already exists\n",resseg, rn->hResHdr,resfilename);
+												fclose(resfile);
+											}
+										}
 										FILE* resfile = fopen(resfilename,"wb");
 										if (resfile) {
+											resources_dumped++;
 											fwrite(resdata, reshdr->uncompressed_len, 1, resfile);
 											fclose(resfile);
 										}else{
@@ -417,6 +432,9 @@ COutline::COutline(FILE* handle) : handle(handle) {
 					}
 				}
 			}
+		}
+		if (get_resource_dump_dir()) {
+			printf("%u resource%s dumped into directory %s\n",resources_dumped,resources_dumped==1?"":"s",get_resource_dump_dir());
 		}
 		if (is_verbose()) {
 			oputs("\n");

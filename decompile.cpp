@@ -1252,6 +1252,25 @@ void MakeUDVRf(struct DecompileInfo di) {
 	return;
 }
 
+void MakeUDV(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != UDV && di.expected_return_type != _HANDLE) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount == 2) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _HANDLE));
+		if (di.result_info) {
+			struct tagOPERATOR* op = ParseGetNthOperand(di.compile_block, di.expression, 1);
+			uint32_t offset = *(uint32_t*)(((uint8_t*)di.compile_block + op->XBuffer));
+			if (offset) {
+				*di.result_info = offset;
+			}
+		}
+		return;
+	}
+	basic_operation("MakeUDV",di);
+	return;
+}
+
 void CnvUDVToHandle(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != UDV && di.expected_return_type != _HANDLE) {
 		//throw new std::exception();
@@ -1329,6 +1348,21 @@ void IntFunSetupClassArray(struct DecompileInfo di) {
 		return;
 	}
 	basic_operation("IntFunSetupClassArray",di);
+	return;
+}
+
+void IntFunSetupUDVRef(struct DecompileInfo di) {
+	if (di.expected_return_type != INTFUNCLASS) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount == 3) {
+		// TODO: unknown role of thrid parameter -- it is ignored for now
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 1), UDV));
+		oputs(".");
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ITEM_REFERENCE));
+		return;
+	}
+	basic_operation("IntFunSetupUDVRef",di);
 	return;
 }
 
@@ -1448,6 +1482,20 @@ void CnvHItemTaggedTEMPTAGGED(struct DecompileInfo di) {
 		return;
 	}
 	basic_operation("CnvHItemTaggedTEMPTAGGED",di);
+	return;
+}
+
+void CnvPointerLPSTR(struct DecompileInfo di) {
+	/*
+	if (di.expected_return_type != _LPVOID && di.expected_return_type != ANY) { /// or other type???
+		throw new std::exception();
+	}
+	 */
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPSTR));
+		return;
+	}
+	basic_operation("CnvPointerLPSTR",di);
 	return;
 }
 
@@ -2141,328 +2189,453 @@ void CnvLPSTRString(struct DecompileInfo di) {
 }
 
 
+
+void CnvLPSHORTRecNumber(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPSHORT));
+		return;
+	}
+	basic_operation("CnvLPSHORTRecNumber", di);
+}
+
+void CnvRecNumberLPSHORT(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != _LPSHORT) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+		return;
+	}
+	basic_operation("CnvRecNumberLPSHORT", di);
+}
+
 void CnvNumberSHORT(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _SHORT) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+	basic_operation("CnvNumberSHORT", di);
 }
 
 void CnvHandleHANDLE(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _HANDLE) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), VARIABLE_HANDLE));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), VARIABLE_HANDLE));
+	basic_operation("CnvHandleHANDLE", di);
 }
 
 void CnvRecBooleanLPBOOL(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPBOOL) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _BOOLEAN));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _BOOLEAN));
+	basic_operation("CnvRecBooleanLPBOOL", di);
 }
 
 void CnvRecDateTimeLPDATETIME(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != LPDATETIME) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), DATETIME));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), DATETIME));
+	basic_operation("CnvRecDateTimeLPDATETIME", di);
 }
 
 void CnvRecNumberLPBYTE(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPBYTE) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+	basic_operation("CnvRecNumberLPBYTE", di);
 }
 
 void CnvRecNumberLPCHAR(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPCHAR) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+	basic_operation("CnvRecNumberLPCHAR", di);
 }
 
 void CnvRecNumberLPDOUBLE(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPDOUBLE) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+	basic_operation("CnvRecNumberLPDOUBLE", di);
 }
 
 void CnvRecNumberLPDWORD(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPDWORD) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+	basic_operation("CnvRecNumberLPDWORD", di);
 }
 
 void CnvRecNumberLPFLOAT(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPFLOAT) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+	basic_operation("CnvRecNumberLPFLOAT", di);
 }
 
 void CnvRecNumberLPINT(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPINT) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+	basic_operation("CnvRecNumberLPINT", di);
 }
 
 void CnvRecNumberLPLONG(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPLONG) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+	basic_operation("CnvRecNumberLPLONG", di);
 }
 
 void CnvRecNumberLPNUMBER(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != LPNUMBER) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+	basic_operation("CnvRecNumberLPNUMBER", di);
 }
 
 void CnvRecNumberLPWORD(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPWORD) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+	basic_operation("CnvRecNumberLPWORD", di);
 }
 
 void CnvRecStringHSTRING(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != HSTRING) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), STRING));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), STRING));
+	basic_operation("CnvRecStringHSTRING", di);
 }
 
 void CnvRecHandleLPHANDLE(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPHANDLE) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _HANDLE));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ANY));
+	basic_operation("CnvRecHandleLPHANDLE", di);
+}
+
+void CnvLPHANDLERecHandle(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != _HANDLE) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPHANDLE));
+		return;
+	}
+	basic_operation("CnvLPHANDLERecHandle", di);
 }
 
 void CnvRecStringLPSTR(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPSTR) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), STRING));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), STRING));
+	basic_operation("CnvRecStringLPSTR", di);
 }
 
 void CnvRecStringLPHSTRING(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != LPHSTRING) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), STRING));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), STRING));
+	basic_operation("CnvRecStringLPHSTRING", di);
 }
 
 void CnvRecStringLPVOID(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPVOID) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), STRING));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), STRING));
+	basic_operation("CnvRecStringLPVOID", di);
 }
 
 void CnvStringHSTRING(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != HSTRING && di.expected_return_type != HBINARY) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		datatype expected = STRING;
+		if (di.expected_return_type == HBINARY) {
+			expected = _BINARY;
+		}
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), expected));
+		return;
 	}
-	datatype expected = STRING;
-	if (di.expected_return_type == HBINARY) {
-		expected = _BINARY;
+	basic_operation("CnvStringHSTRING", di);
+}
+
+void CnvHSTRINGString(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != STRING && di.expected_return_type != _BINARY) {
+		//throw new std::exception();
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), expected));
+	if (di.expression->XOperandCount == 1) {
+		datatype expected = HSTRING;
+		if (di.expected_return_type == _BINARY) {
+			expected = HBINARY;
+		}
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), expected));
+		return;
+	}
+	basic_operation("CnvHSTRINGString", di);
 }
 
 void CnvStringLPSTR(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPSTR) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), STRING));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), STRING));
+	basic_operation("CnvStringLPSTR", di);
 }
 
 void CnvStringLPVOID(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _LPVOID) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), STRING));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), STRING));
+	basic_operation("CnvStringLPVOID", di);
 }
 
 void CnvLPBOOLRecBoolean(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPBOOL));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPBOOL));
+	basic_operation("CnvLPBOOLRecBoolean", di);
 }
 
 void CnvLPDATETIMERectDateTime(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != DATETIME) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), LPDATETIME));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), LPDATETIME));
+	basic_operation("CnvLPDATETIMERectDateTime", di);
 }
 
 void CnvLPBYTERecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPBYTE));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPBYTE));
+	basic_operation("CnvLPBYTERecNumber", di);
 }
 
 void CnvLPCHARRecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPCHAR));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPCHAR));
+	basic_operation("CnvLPCHARRecNumber", di);
 }
 
 void CnvLPDOUBLERecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPDOUBLE));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPDOUBLE));
+	basic_operation("CnvLPDOUBLERecNumber", di);
 }
 
 void CnvLPDWORDRecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPDWORD));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPDWORD));
+	basic_operation("CnvLPDWORDRecNumber", di);
 }
 
 void CnvLPFLOATRecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPFLOAT));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPFLOAT));
+	basic_operation("CnvLPFLOATRecNumber", di);
 }
 
 void CnvLPINTRecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPINT));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPINT));
+	basic_operation("CnvLPINTRecNumber", di);
 }
 
 void CnvLPLONGRecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPLONG));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPLONG));
+	basic_operation("CnvLPLONGRecNumber", di);
 }
 
 void CnvLPNUMBERRecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), LPNUMBER));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), LPNUMBER));
+	basic_operation("CnvLPNUMBERRecNumber", di);
 }
 
 void CnvLPWORDRecNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount != 1) {
-		throw new std::exception();
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPWORD));
+		return;
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPWORD));
+	basic_operation("CnvLPWORDRecNumber", di);
+}
+
+void CnvHSTRINGRecString(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != STRING) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), HSTRING));
+		return;
+	}
+	basic_operation("CnvHSTRINGRecString", di);
+}
+
+void CnvLPSTRRecString(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != STRING) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPSTR));
+		return;
+	}
+	basic_operation("CnvLPSTRRecString", di);
+}
+
+void CnvLPHSTRINGRecString(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != STRING) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), LPHSTRING));
+		return;
+	}
+	basic_operation("CnvLPHSTRINGRecString", di);
+}
+
+void CnvLPVOIDRecString(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != STRING) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPVOID));
+		return;
+	}
+	basic_operation("CnvLPVOIDRecString", di);
 }
 
 void CnvHSTRINGhString(struct DecompileInfo di) {
@@ -2545,6 +2718,50 @@ void CnvStringLPASCSTR(struct DecompileInfo di) {
 	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), STRING));
 }
 
+void CnvLPASCSTRString(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != STRING) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), LPASCSTR));
+		return;
+	}
+	basic_operation("CnvLPASCSTRString", di);
+}
+
+void CnvLPASCSTRRecString(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != STRING) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), LPASCSTR));
+		return;
+	}
+	basic_operation("CnvLPASCSTRRecString", di);
+}
+
+void CnvLPWCHARRecNumber(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LPWCHAR));
+		return;
+	}
+	basic_operation("CnvLPWCHARRecNumber", di);
+}
+
+void CnvRecNumberLPWCHAR(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != _LPWCHAR) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount == 1) {
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+		return;
+	}
+	basic_operation("CnvRecNumberLPWCHAR", di);
+}
+
 void CnvToBoolean(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
 		//throw new std::exception();
@@ -2621,7 +2838,7 @@ void ArrayObjectAddress(struct DecompileInfo di) {
 	basic_operation("ArrayObjectVar", di);
 }
 
-// TODO: this array is not complete // see DispatchArray below for complete list
+// TODO: implement missing functions and complete this array
 void (*DispatchFunction[])(struct DecompileInfo di) = {
 		Const,
 		Add,
@@ -2732,7 +2949,7 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		CnvStringLPSTR,
 		CnvStringLPVOID,
 		CnvHItemTEMPLATE,
-		__not_implemented_yet, // CnvLPHANDLERecHandle
+		CnvLPHANDLERecHandle,
 		CnvLPBOOLRecBoolean,
 		CnvLPDATETIMERectDateTime,
 		CnvLPBYTERecNumber,
@@ -2744,17 +2961,17 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		CnvLPLONGRecNumber,
 		CnvLPNUMBERRecNumber,
 		CnvLPWORDRecNumber,
-		__not_implemented_yet, // CnvHSTRINGRecString
-		__not_implemented_yet, // CnvLPSTRRecString
-		__not_implemented_yet, // CnvLPHSTRINGRecString
-		__not_implemented_yet, // CnvLPVOIDRecString
+		CnvHSTRINGRecString,
+		CnvLPSTRRecString,
+		CnvLPHSTRINGRecString,
+		CnvLPVOIDRecString,
 		CnvDOUBLENumber,
 		CnvNUMBERNum,
 		CnvFLOATNumber,
 		CnvLONGNumber,
 		CnvDATETIMEDate,
 		CnvHANDLEHan,
-		__not_implemented_yet, // CnvHSTRINGString
+		CnvHSTRINGString,
 		__not_implemented_yet, // CnvTEMPLATEHItem
 		CnvINTNumber,
 		CnvCHARNumber,
@@ -2781,7 +2998,7 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		ArrayObjectAddress,
 		__not_implemented_yet, // CnvUnlockUnRef
 		CnvToBoolean,
-		__not_implemented_yet, // IntFunSetupUDVRef
+		IntFunSetupUDVRef,
 		MakeUDVRef,
 		GetVarUDVRef,
 		CnvUdvRefUDVREF,
@@ -2789,7 +3006,7 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		__not_implemented_yet, // GetParenthWndByLevel
 		CheckIndexList,
 		CnvHItemTaggedTEMPTAGGED,
-		__not_implemented_yet, // CnvPointerLPSTR
+		CnvPointerLPSTR,
 		__not_implemented_yet, // CnvTEMPTAGGEDHItemTagged
 		CnvStaticString,
 		ConstH,
@@ -2799,8 +3016,8 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		CnvSHORTNumber,
 		CnvNumberSHORT,
 		CnvLPSTRString,
-		__not_implemented_yet, // CnvLPSHORTRecNumber
-		__not_implemented_yet, // CnvRecNumberLPSHORT
+		CnvLPSHORTRecNumber,
+		CnvRecNumberLPSHORT,
 		New,
 		PutUDVHan,
 		GetUDVHan,
@@ -2816,25 +3033,25 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		CompareUDVNE,
 		CastToUDV,
 		__not_implemented_yet, // AdjustUDVRef
-		__not_implemented_yet, // MakeUDV
+		MakeUDV,
 		__not_implemented_yet, // ResetUDV
 		__not_implemented_yet, // PutUDVREF
 		__not_implemented_yet, // GetUDVREF
 		__not_implemented_yet, // CnvExtUDVREF
 		CnvStringLPWSTR,
-		CnvRecStringLPWSTR, // CnvRecStringLPWSTR
-		__not_implemented_yet, // CnvLPWSTRRecString
-		__not_implemented_yet, // CnvLPWSTRString
+		CnvRecStringLPWSTR,
+		CnvLPWSTRRecString,
+		CnvLPWSTRString,
 		CnvNumberWCHAR,
 		CnvWCHARNumber,
-		CnvLPWSTRString,
-		CnvLPWSTRRecString,
+		CnvLPWSTRString, // [duplicate] ; works on BINARY instead of STRING
+		CnvLPWSTRRecString, // [duplicate] ; works on BINARY instead of STRING
 		CnvRecStringLPASCSTR,
 		CnvStringLPASCSTR,
-		__not_implemented_yet, // CnvLPASCSTRString
-		__not_implemented_yet, // CnvLPASCSTRRecString
-		__not_implemented_yet, // CnvLPWCHARRecNumber
-		__not_implemented_yet, // CnvRecNumberLPWCHAR
+		CnvLPASCSTRString,
+		CnvLPASCSTRRecString,
+		CnvLPWCHARRecNumber,
+		CnvRecNumberLPWCHAR,
 		__not_implemented_yet, // GethWndFrame
 		GetArrayString, // [duplicate] ; works on BINARY instead of STRING
 		PutArrayString, // [duplicate] ; works on BINARY instead of STRING
@@ -2842,10 +3059,10 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		GetVarString, // [duplicate] ; works on BINARY instead of STRING
 		PutReturnString, // [duplicate] ; works on BINARY instead of STRING
 		CnvHSTRINGhString, // [duplicate] ; works on BINARY instead of STRING
-		__not_implemented_yet, // CnvRecStringLPHSTRING
-		__not_implemented_yet, // CnvLPHSTRINGRecString
-		__not_implemented_yet, // CnvRecStringHSTRING
-		__not_implemented_yet, // CnvHSTRINGRecString
+		CnvRecStringLPHSTRING, // [duplicate] ; works on BINARY instead of STRING
+		CnvLPHSTRINGRecString, // [duplicate] ; works on BINARY instead of STRING
+		CnvRecStringHSTRING, // [duplicate] ; works on BINARY instead of STRING
+		CnvHSTRINGRecString, // [duplicate] ; works on BINARY instead of STRING
 		CnvStringHSTRING, // [duplicate] ; works on BINARY instead of STRING
 		CompareBinaryLT,
 		CompareBinaryGT,
@@ -2853,9 +3070,9 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		CompareBinaryLE,
 		CompareBinaryGE,
 		CompareBinaryNE,
-		__not_implemented_yet, // CnvRecStringLPVOID
-		__not_implemented_yet, // CnvLPVOIDRecString
-		__not_implemented_yet, // CnvStringLPVOID
+		CnvRecStringLPVOID, // [duplicate] ; works on BINARY instead of STRING
+		CnvLPVOIDRecString, // [duplicate] ; works on BINARY instead of STRING
+		CnvStringLPVOID, // [duplicate] ; works on BINARY instead of STRING
 		New, // New2 (for use with IntConstructor)
 		IntConstructor,
 		__not_implemented_yet, // Return

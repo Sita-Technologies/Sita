@@ -31,10 +31,12 @@ void print_usage(const char* command) {
 	puts("decompiler for programs created with opentext Gupta Team Developer 6.0-7.4");
 	puts("");
 	puts("options:");
-	puts("  -v              verbose/debug output");
-	puts("  -d <dir>        dump segment data to dir");
-	puts("  -r <dir>        dump resources to dir");
 	puts("  -a <filename>   write decompiled program to app file");
+	puts("  -r <dir>        dump resources into dir");
+	puts("");
+	puts("debug options:");
+	puts("  -v              verbose/debug output");
+	puts("  -d <dir>        dump raw item data into dir");
 	//puts("  -t <filename>   write decompiled program to apt file");
 	//puts("  -q              quiet (don't print decompiled program to console)");
 }

@@ -128,8 +128,7 @@ void print_utf16(const char16_t* str, size_t len) {
 	iconv(str_convert, (char**)&str, &len, &out_buffer, &out_len);
 	iconv_close(str_convert);
 #else
-	out_len = WideCharToMultiByte(CP_UTF8, WC_NO_BEST_FIT_CHARS, (LPCWCH)str, (int)len, out, (int)out_len, NULL, NULL);
-	out_buffer += out_len;
+	out_buffer += WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)str, (int)len/2, out, (int)out_len, NULL, NULL);
 #endif
 	*out_buffer = 0;
 	oputs(out);
@@ -156,8 +155,7 @@ void print_utf16_quoted(const char16_t* str, size_t len) {
 	iconv(str_convert, (char**)&str, &len, &out_buffer, &out_len);
 	iconv_close(str_convert);
 #else
-	out_len = WideCharToMultiByte(CP_UTF8, WC_NO_BEST_FIT_CHARS, (LPCWCH)str, (int)len, out, (int)out_len, NULL, NULL);
-	out_buffer += out_len;
+	out_buffer += WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)str, (int)len/2, out, (int)out_len, NULL, NULL);
 #endif
 	*out_buffer = 0;
 	oputs("\"");
