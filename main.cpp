@@ -53,7 +53,6 @@
 // TODO: work on FIXMEs in all source files
 
 // beta version
-// TODO: test and support other versions than opentext Gupta Team Developer 7.2.0 // check "Outline Version" // what about string-encoding? is it always UTF-16?
 // TODO: support 64bit apps
 // TODO: analyze Object Nationalizer string language/translation table
 // TODO: try to detect Sal Constants (like e.g. MB_OK in SalMessageBox calls) and replace Numbers by these constants
@@ -68,7 +67,7 @@
 // TODO: work on TODOs in all source files
 // TODO: check exception handling, work on memory alloc and free
 
-#define SITA_VERSION "0.1-alpha_pre"
+#define SITA_VERSION "0.1-alpha_pre2"
 
 void print_indent(uint32_t indent) {
 	for (uint32_t i=0; i<indent; i++) {
@@ -212,7 +211,7 @@ int main(int argc, char** argv) {
 	puts("opensource Sita Team Decompiler " SITA_VERSION "\n");
 
 	if (!parse_command_line(argc, argv)) {
-		print_usage(*argv);
+		print_usage(argc>0?*argv:"Sita");
 		return 1;
 	}
 
@@ -240,12 +239,16 @@ int main(int argc, char** argv) {
 	init_system_vars();
 	COutline outline(td);
 
+	if (outline.get_file_hdr().version < VERSION_TD51) {
+		fprintf(stderr,"error: binaries created with TD before version 5.1 are not supported\n");
+		exit(1); // 64bit not supported
+	}
 	if (outline.get_file_hdr().flags & FLAG_IS_64BIT) {
 		fprintf(stderr,"error: 64bit binaries are not supported\n");
 		exit(1); // 64bit not supported
 	}
 	if (is_verbose()) {
-		oprintf("Information about %s:\n",argv[argc-1]);
+		oprintf("Information about %s:\n",get_input_filename());
 		outline.print_stats();
 	}
 
