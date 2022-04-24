@@ -91,6 +91,7 @@ enum datatype {
 	_HANDLE,
 	_LPBYTE,
 	_LPCHAR,
+	_LPSHORT,
 	_LPDOUBLE,
 	_LPWORD,
 	_LPDWORD,
@@ -98,6 +99,7 @@ enum datatype {
 	_LPINT,
 	LPNUMBER,
 	_WCHAR,
+	_LPWCHAR,
 	UDV
 };
 

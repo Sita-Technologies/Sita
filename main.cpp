@@ -240,7 +240,6 @@ int main(int argc, char** argv) {
 	init_system_vars();
 	COutline outline(td);
 
-
 	if (outline.get_file_hdr().flags & FLAG_IS_64BIT) {
 		fprintf(stderr,"error: 64bit binaries are not supported\n");
 		exit(1); // 64bit not supported
@@ -249,31 +248,33 @@ int main(int argc, char** argv) {
 		oprintf("Information about %s:\n",argv[argc-1]);
 		outline.print_stats();
 	}
-	iterate_items(outline,outline.top_item(),0,NULL, true);
-	iterate_items(outline,outline.top_item(),0,NULL);
 
-	if (is_verbose()) {
-		oputs("\n=== STRING TABLE ===\n");
-		uint32_t string_id = 0;
-		const struct String* str = outline.string_lookup(string_id);
-		while (str) {
-			oprintf("0x%08x: ",string_id);
-			print_utf16(str->str, str->len);
-			oputs("\n");
-			str = outline.string_lookup(++string_id);
-		}
-	}
+	if (get_app_output_filename() || !get_resource_dump_dir()) {
+		iterate_items(outline,outline.top_item(),0,NULL, true);
+		iterate_items(outline,outline.top_item(),0,NULL);
 
-	if (get_app_output_filename()) {
-		// create .app file
-		FILE* app_output = fopen(get_app_output_filename(),"w+b");
-		if (!app_output) {
-			fprintf(stderr,"cannot write to file %s\n",get_app_output_filename());
-			return 1;
+		if (is_verbose()) {
+			oputs("\n=== STRING TABLE ===\n");
+			uint32_t string_id = 0;
+			const struct String* str = outline.string_lookup(string_id);
+			while (str) {
+				oprintf("0x%08x: ",string_id);
+				print_utf16(str->str, str->len);
+				oputs("\n");
+				str = outline.string_lookup(++string_id);
+			}
 		}
-		outline.save(app_output);
-		fclose(app_output);
-		printf("decompiled app written to %s\n",get_app_output_filename());
+		if (get_app_output_filename()) {
+			// create .app file
+			FILE* app_output = fopen(get_app_output_filename(),"w+b");
+			if (!app_output) {
+				fprintf(stderr,"cannot write to app file %s\n",get_app_output_filename());
+				return 1;
+			}
+			outline.save(app_output);
+			fclose(app_output);
+			printf("decompiled app written to app file %s\n",get_app_output_filename());
+		}
 	}
 	return 0;
 }
