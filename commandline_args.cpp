@@ -28,7 +28,7 @@ char* app_output = NULL;
 
 void print_usage(const char* command) {
 	printf("usage: %s [option [option [...]]] <compiled.exe>\n",command);
-	puts("decompiler for programs created with opentext Gupta Team Developer 6.0-7.4");
+	puts("decompiler for programs created with opentext Gupta Team Developer 5.1-7.4");
 	puts("");
 	puts("options:");
 	puts("  -a <filename>   write decompiled program to app file");

@@ -94,6 +94,11 @@ COutline::COutline(FILE* handle) : handle(handle) {
 		printf("Offset: 0x%08lx\n",offset);
 	}
 
+	if (this->file_hdr.version < VERSION_TD51) {
+		fprintf(stderr,"error: binaries created with TD before 5.1 are not supported (yet)\n");
+		exit(1); // 64bit not supported
+	}
+
 	// read outline
 	this->outline = alloc<struct Outline*>(this->file_hdr.outline_alloc);
 	fread_or_throw(this->outline, this->file_hdr.outline_alloc, handle);
@@ -146,8 +151,8 @@ COutline::COutline(FILE* handle) : handle(handle) {
 	if (is_verbose()) {
 		// seems to be always ZERO...
 		printf("co_class_interface_map_len: -> 0x%08x\n",this->file_hdr.co_class_interface_map_len);
-
 		printf("hResInfo: -> 0x%04x\n",this->outline->hResInfo); // item_id of hResInfo struct
+		printf("hStringTables: -> 0x%08x\n",this->outline->h_string_tables);
 		printf("\n");
 	}
 
@@ -277,10 +282,21 @@ COutline::COutline(FILE* handle) : handle(handle) {
 	// read HStringTable /// seems to be padded to an offset modulo 4 == 0
 	if (this->outline->h_string_tables) {
 		fseek_or_throw(handle,offset+this->outline->h_string_tables);
-		fread_or_throw(&this->cmphdr, sizeof(struct CompressionHeader), handle);
+		if (file_hdr.version >= VERSION_TD70) {
+			fread_or_throw(&this->cmphdr, sizeof(struct CompressionHeader), handle);
+		}else{
+			fread_or_throw(&this->cmphdr, sizeof(struct CompressionHeader)-2, handle);
+		}
 		if (this->cmphdr.uncomp_size != 0) {
 			this->str_data = alloc<char*>(this->cmphdr.uncomp_size);
 			this->OsReadFast(this->cmphdr.uncomp_size, str_data);
+			if (is_verbose()) {
+				FILE* strdump = fopen("strdump.bin","wb");
+				if (strdump) {
+					fwrite(str_data,1,this->cmphdr.uncomp_size,strdump);
+					fclose(strdump);
+				}
+			}
 			this->string_table = (struct StringTable*)(&str_data[this->cmphdr.hstring_size]);
 		}
 	}
@@ -1401,42 +1417,32 @@ void COutline::print_stat(uint32_t value, const char* name) {
 
 void COutline::print_stats() {
 	oputs("Built with Team Developer ");
-	switch (file_hdr.version) {
-	case VERSION_TD60:
-		oputs("6.0");
-		break;
-	case VERSION_TD61:
-		oputs("6.1");
-		break;
-	case VERSION_TD62:
-		oputs("6.2");
-		break;
-	case VERSION_TD63:
-		oputs("6.3");
-		break;
-	case VERSION_TD70:
-		oputs("7.0");
-		break;
-	case VERSION_TD71:
-		oputs("7.1");
-		break;
-	case VERSION_TD72:
-		oputs("7.2");
-		break;
-	case VERSION_TD73:
-		oputs("7.3");
-		break;
-	case VERSION_TD74:
+	if (file_hdr.version > VERSION_TD74) {
+		oputs("newer than 7.4");
+	}else if (file_hdr.version >= VERSION_TD74) {
 		oputs("7.4");
-		break;
-	default:
-		if (file_hdr.version < VERSION_TD61) {
-			oputs("before 6.0");
-		}else if (file_hdr.version > VERSION_TD74) {
-			oputs("newer than 7.4");
-		}else{
-			oputs("6.x (unknown version)");
-		}
+	}else if (file_hdr.version >= VERSION_TD73) {
+		oputs("7.3");
+	}else if (file_hdr.version >= VERSION_TD72) {
+		oputs("7.2");
+	}else if (file_hdr.version >= VERSION_TD71) {
+		oputs("7.1");
+	}else if (file_hdr.version >= VERSION_TD70) {
+		oputs("7.0");
+	}else if (file_hdr.version >= VERSION_TD63) {
+		oputs("6.3");
+	}else if (file_hdr.version >= VERSION_TD62) {
+		oputs("6.2");
+	}else if (file_hdr.version >= VERSION_TD61) {
+		oputs("6.1");
+	}else if (file_hdr.version >= VERSION_TD60) {
+		oputs("6.0");
+	}else if (file_hdr.version >= VERSION_TD52) {
+		oputs("5.2");
+	}else if (file_hdr.version >= VERSION_TD51) {
+		oputs("5.1");
+	}else{
+		oputs("before 5.1");
 	}
 	if ((outline->flags & OFLAG_GLMS_SIGN_MASK)==OFLAG_GLMS_SIGN_TESTVERSION) {
 		oputs(" (trial version)");
