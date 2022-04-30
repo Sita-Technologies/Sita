@@ -26,25 +26,18 @@
 #else
 #error "neither Unix nor Windows environment defined"
 #endif
-#include "item.hpp"
 #include "outline_decs.hpp"
-#include "COutline.hpp"
 #include "decompile.hpp"
 #include "helper.hpp"
 #include "commandline_args.hpp"
 #include "SalNumber.hpp"
+#include "item.hpp"
+#include "COutline.hpp"
 #include <stdio.h>
 #include <string.h>
 #include <exception>
 
-struct ItemBodyType {
-	const char* name;
-	uint8_t val1;
-	uint8_t val2;
-	uint8_t val3;
-	uint8_t size;
-};
-
+#ifndef TDx64
 struct ItemBodyType item_bodies[0x3d] = {
 		{"NULL", 0x01, 0x01, 0x00, 0x00}, // 0x00
 		{"TEXT", 0x01, 0x00, 0x00, 0x00}, // 0x01
@@ -108,18 +101,73 @@ struct ItemBodyType item_bodies[0x3d] = {
 		{"ON_TABBAR", 0x01, 0x01, 0x00, 0x04}, // 0x3b
 		{"DEFAULT_CONSTRUCTOR", 0x00, 0x01, 0x00, 0x04} // 0x3c
 };
+#else
+struct ItemBodyType item_bodies[0x3d] = {
+		{"NULL", 0x01, 0x01, 0x00, 0x00},
+		{"TEXT", 0x01, 0x00, 0x00, 0x00},
+		{"INT", 0x01, 0x01, 0x00, 0x04},
+		{"LONG", 0x01, 0x01, 0x00, 0x08},
+		{"HBITMAP", 0x01, 0x01, 0x00, 0x00},
+		{"LIST", 0x01, 0x01, 0x00, 0x04},
+		{"HWND", 0x00, 0x01, 0x00, 0x08},
+		{"STRUCT", 0x01, 0x01, 0x00, 0x00},
+		{"COORD", 0x01, 0x01, 0x00, 0x04},
+		{"CODE", 0x00, 0x01, 0x00, 0x00},
+		{"OLDVAROFFSET", 0x00, 0x00, 0x00, 0x02},
+		{"DLGITEM", 0x00, 0x01, 0x00, 0x04},
+		{"METAFILEPICT", 0x01, 0x01, 0x01, 0x00},
+		{"HANDLE", 0x01, 0x01, 0x00, 0x08},
+		{"ICON", 0x01, 0x01, 0x01, 0x00},
+		{"ARRAYBOUNDS", 0x00, 0x01, 0x00, 0x08},
+		{"INCLUDEHITEM", 0x00, 0x01, 0x00, 0x08},
+		{"PICTURE", 0x01, 0x01, 0x00, 0x00},
+		{"CLASS_MSGS", 0x00, 0x01, 0x00, 0x00},
+		{"HITEM", 0x01, 0x01, 0x00, 0x08},
+		{"WINATTR", 0x01, 0x01, 0x00, 0x00},
+		{"RESOURCEID", 0x01, 0x01, 0x00, 0x02},
+		{"QUESTQUERYDEF", 0x01, 0x01, 0x01, 0x00},
+		{"QUESTCOLUMNINFO", 0x01, 0x01, 0x01, 0x00},
+		{"WINSTYLE", 0x01, 0x01, 0x00, 0x04},
+		{"SQLWB", 0x01, 0x01, 0x01, 0x04},
+		{"RESOURCE", 0x01, 0x01, 0x01, 0x02},
+		{"VIEWSIZE", 0x01, 0x01, 0x01, 0x02},
+		{"VIEWINFO", 0x01, 0x01, 0x01, 0x00},
+		{"VIRTFUN", 0x00, 0x01, 0x00, 0x00},
+		{"VIRTFUNMERGED", 0x00, 0x00, 0x00, 0x04},
+		{"CCDATA", 0x01, 0x01, 0x01, 0x00},
+		{"CCSIZE", 0x01, 0x01, 0x01, 0x02},
+		{"CLASSCHILDOFFSET", 0x00, 0x01, 0x00, 0x08},
+		{"ORDINAL", 0x00, 0x01, 0x00, 0x04},
+		{"CLASSPROPS", 0x01, 0x01, 0x01, 0x00},
+		{"CLASSPROPSSIZE", 0x01, 0x01, 0x01, 0x02},
+		{"QUESTVIEWDEF", 0x01, 0x01, 0x01, 0x02},
+		{"INHERITQUEST", 0x01, 0x01, 0x01, 0x02},
+		{"INHERITPROPS", 0x01, 0x01, 0x01, 0x02},
+		{"MDARRAYBOUNDS", 0x00, 0x01, 0x00, 0x00},
+		{"SYMID", 0x00, 0x01, 0x00, 0x04},
+		{"DYNALIB_ORDINAL", 0x00, 0x01, 0x00, 0x02},
+		{"HLIBSAL", 0x00, 0x01, 0x00, 0x04},
+		{"DT_MAKERUNDLG", 0x01, 0x01, 0x01, 0x00},
+		{"INCLUDEINFO", 0x00, 0x01, 0x00, 0x02},
+		{"COMPILER_STRUCT", 0x00, 0x01, 0x00, 0x00},
+		{"COMPILER_INT", 0x00, 0x01, 0x00, 0x04},
+		{"CHILDLINECOUNT", 0x01, 0x00, 0x00, 0x04},
+		{"ITEMPREV", 0x01, 0x00, 0x00, 0x04},
+		{"ITEMCLONE", 0x01, 0x01, 0x00, 0x08},
+		{"VAROFFSET", 0x00, 0x01, 0x00, 0x04},
+		{"CLASS_XMSGS", 0x00, 0x01, 0x00, 0x00},
+		{"ONX_INT", 0x01, 0x01, 0x01, 0x04},
+		{"CLASS_DISPATCH", 0x01, 0x01, 0x00, 0x00},
+		{"CLASS_CONSTRUCTOR", 0x00, 0x01, 0x00, 0x02},
+		{"COM_DISPATCHFLAG", 0x01, 0x01, 0x00, 0x02},
+		{"CLASS_DESTRUCTOR", 0x00, 0x01, 0x00, 0x08},
+		{"BRKPTINFO", 0x00, 0x01, 0x00, 0x02},
+		{"ON_TABBAR", 0x01, 0x01, 0x00, 0x08},
+		{"DEFAULT_CONSTRUCTOR", 0x00, 0x01, 0x00, 0x08}
+};
+#endif
 
-uint16_t CItem::itembody_elementsize(struct ItemBody* item_body) {
-	if (item_body->type && item_body->type <= 0x3c) {
-		uint8_t size = item_bodies[item_body->type].size;
-		if (!size) {
-			return 3 + item_body->size;
-		}
-		return 1+size;
-	}
-	return 0;
-}
-
+#ifndef TDx64
 const char* get_event_name(struct ItemBody* item_body) {
 	if (item_body->type != 0x2f) {
 		return NULL;
@@ -250,11 +298,26 @@ const char* get_event_name(struct ItemBody* item_body) {
 		return NULL;
 	}
 }
+#endif
+
+uint16_t CItem::itembody_elementsize(struct ItemBody* item_body) {
+	if (item_body->type && item_body->type <= 0x3c) {
+		uint8_t size = item_bodies[item_body->type].size;
+		if (!size) {
+			return 3 + item_body->size;
+		}
+		return 1+size;
+	}
+	return 0;
+}
 
 struct ItemBody* CItem::itembody_next(struct ItemBody* item_body, struct tagITEM* p_item) {
 	if (item_body == NULL) {
 		// get first
 		// test for remaining length
+		if (!p_item) {
+			return NULL;
+		}
 		if (p_item->data_length < 3 || p_item->data_length < itembody_elementsize((struct ItemBody*)p_item->data)) {
 			// item incomplete
 			if (is_verbose() && p_item->data_length) {
@@ -290,7 +353,7 @@ struct ItemBody* CItem::itembody_next(struct ItemBody* item_body, struct tagITEM
 	return (struct ItemBody*)((char*)item_body + elem_size);
 }
 
-struct ItemBody* CItem::get_itembody(class COutline* outline, uint32_t item_id, uint16_t type) {
+struct ItemBody* CItem::get_itembody(class COutline* outline, uint64_t item_id, uint16_t type) {
 	tagITEM* p_item = outline->get_item(item_id);
 	if (!p_item) {
 		return NULL;
@@ -317,7 +380,7 @@ struct ItemBody* CItem::get_itembody(class COutline* outline, uint32_t item_id, 
 CItem::CItem(const char* name) : name(name) {
 }
 
-void CItem::first_pass(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CItem::first_pass(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	struct ItemBody* dlgitem = get_itembody(outline, item_id, 0x0b);
 	if (dlgitem) {
 		if (!CDlg::cur_dlg_item.empty()) {
@@ -326,10 +389,10 @@ void CItem::first_pass(class COutline* outline, uint32_t item_id, uint32_t* memo
 	}
 }
 
-void CItem::preprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CItem::preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 }
 
-void CItem::print(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+void CItem::print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 	if (this->name != NULL) {
 		oputs(this->name);
 	}else if (is_verbose()) {
@@ -359,7 +422,7 @@ void CItem::print(class COutline* outline, uint32_t item_id, uint32_t* memory_it
 	}
 }
 
-void CItem::print_all_itembodies(class COutline* outline, uint32_t item_id) {
+void CItem::print_all_itembodies(class COutline* outline, uint64_t item_id) {
 	tagITEM* p_item = outline->get_item(item_id);
 	for (struct ItemBody* item_body = itembody_next(0,p_item);item_body;item_body = itembody_next(item_body,p_item)) {
 		if (item_body->type == 0x01) {
@@ -395,7 +458,7 @@ void CItem::print_all_itembodies(class COutline* outline, uint32_t item_id) {
 	}
 }
 
-void CItem::itembody_add_string(class COutline* outline, uint32_t item_id, const char* str) {
+void CItem::itembody_add_string(class COutline* outline, uint64_t item_id, const char* str) {
 	size_t len = strlen(str);
 	if (len) {
 		// convert to UTF-16
@@ -420,7 +483,7 @@ void CItem::itembody_add_string(class COutline* outline, uint32_t item_id, const
 	}
 }
 
-void CItem::decompile(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CItem::decompile(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	if (get_app_output_filename() && !get_itembody(outline, item_id, 0x01)) {
 
 		const char16_t* str = outline->symbol_lookup(item_id);
@@ -472,7 +535,7 @@ void CItem::decompile(class COutline* outline, uint32_t item_id, uint32_t* memor
 	}
 }
 
-void CItem::print_array_boundaries(class COutline* outline, uint32_t item_id) {
+void CItem::print_array_boundaries(class COutline* outline, uint64_t item_id) {
 	// print array bounds
 	struct ItemBody* item_body = get_itembody(outline, item_id, 0x28);
 	if (item_body) {
@@ -498,10 +561,10 @@ void CItem::print_array_boundaries(class COutline* outline, uint32_t item_id) {
 	}
 }
 
-void CItem::postprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CItem::postprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 }
 
-void CItem::add_itembody(class COutline* outline, uint32_t item_id, struct ItemBody* item_body) {
+void CItem::add_itembody(class COutline* outline, uint64_t item_id, struct ItemBody* item_body) {
 	if (!item_body) {
 		return;
 	}
@@ -511,14 +574,14 @@ void CItem::add_itembody(class COutline* outline, uint32_t item_id, struct ItemB
 	}
 	uint16_t size = itembody_elementsize(item_body);
 	if (!outline->change_item_size(item_id, p_item->data_length + size)) {
-		fprintf(stderr,"error: resize of item 0x%08x failed",item_id);
+		fprintf(stderr,"error: resize of item 0x%08x failed\n",item_id);
 		return;
 	}
 	p_item = outline->get_item(item_id);
 	memcpy(&p_item->data[p_item->data_length-size],item_body,size);
 }
 
-void CItem::remove_itembody(class COutline* outline, uint32_t item_id, uint8_t itembody_type) {
+void CItem::remove_itembody(class COutline* outline, uint64_t item_id, uint8_t itembody_type) {
 	tagITEM* p_item = outline->get_item(item_id);
 	if (!p_item) {
 		return;
@@ -552,7 +615,7 @@ void CItem::remove_itembody(class COutline* outline, uint32_t item_id, uint8_t i
 	}
 }
 
-void CItem::addvar(class COutline* outline, uint32_t memory_item, varscope var_scope, uint32_t item) {
+void CItem::addvar(class COutline* outline, uint64_t memory_item, varscope var_scope, uint64_t item) {
 	// get variable name and memory offset!!
 	tagITEM* p_item = outline->get_item(item);
 	if (!p_item) {
@@ -610,11 +673,12 @@ void CItem::addvar(class COutline* outline, uint32_t memory_item, varscope var_s
 			}
 		}
 
-
+		/*
 		if (is_verbose()) {
 			oprintf("[[WARN: var_size is 0, var_offset is 0x%04x]]",var_offset);
 		}
 		return; // don't add variable of empty size
+		*/
 	}
 
 	outline->add_variable(memory_item, var_scope, var_offset, item);
@@ -630,17 +694,14 @@ public:
 	COutlineVersion() : CItem(NULL) {
 	}
 
-	virtual void print(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		uint16_t ver = 0;
-		if (outline->get_file_hdr().version < VERSION_TD60) {
-			// too small
-			ver = 41;
-		}else if (outline->get_file_hdr().version > VERSION_TD74) {
-			// too large
-			ver = VERSION_TD74 + 41 - VERSION_TD60;
+		if (outline->get_file_hdr().version < VERSION_TD52) {
+			// outline version of TD5.1 is 37; older versions are not supported (yet)
+			ver = 37;
 		}else{
-			// supported area
-			ver = outline->get_file_hdr().version + 41 - VERSION_TD60;
+			// TD5.2 - TD7.4 follow this pattern
+			ver = outline->get_file_hdr().version + 39 - VERSION_TD52;
 		}
 		oprintf("Outline Version - 4.0.%u",ver);
 	}
@@ -649,7 +710,7 @@ public:
 	}
 };
 
-uint32_t CItem::get_funcvar_typedef(class COutline* outline, uint32_t item_id) {
+uint32_t CItem::get_funcvar_typedef(class COutline* outline, uint64_t item_id) {
 	struct ItemBody* item_body = CItem::get_itembody(outline, item_id, 0x14);
 	if (item_body && item_body->size >= 7) {
 		if (item_body->data[0] == 0x05) {
@@ -664,7 +725,7 @@ class CFunctionalVar : public CItem {
 public:
 	CFunctionalVar() : CItem(NULL) {
 	}
-	virtual void print(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		bool printed = false;
 		uint32_t typedef_at = get_funcvar_typedef(outline, item_id);
 		if (typedef_at) {
@@ -721,7 +782,7 @@ public:
 	/**
 	 * decompile corresponding line of code
 	 */
-	virtual void print(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		//bool tmp = DEBUG;
 		//DEBUG = false;
 		CItem::print(outline, item_id, memory_item);
@@ -735,7 +796,7 @@ public:
 			oputs(" ");
 			struct CompileBlock* compile_block = (struct CompileBlock*)item_body->data;
 			if (compile_block->size > 0 && compile_block->start > 0) {
-				struct DecompileInfo di = { // @suppress("Invalid arguments")
+				struct DecompileInfo di = {
 						outline,
 						memory_item,
 						compile_block,
@@ -768,7 +829,7 @@ public:
 	/**
 	 * decompile corresponding line of code
 	 */
-	virtual void print(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		CItem::print(outline, item_id, memory_item);
 
 		if (outline->get_item_loop_info(item_id)) {
@@ -788,12 +849,12 @@ uint32_t CLoop::last_loop_id = 0;
  */
 class CBreak : public CItem {
 public:
-	CBreak() : CItem("Break") {
+	CBreak(const char* name) : CItem(name) {
 	}
 	/**
 	 * decompile corresponding line of code
 	 */
-	virtual void print(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		CItem::print(outline, item_id, memory_item);
 
 		struct ItemBody* item_body = get_itembody(outline, item_id, 0x03);
@@ -812,7 +873,7 @@ public:
 		}
 	}
 
-	virtual void first_pass(COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+	virtual void first_pass(COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 		CItem::first_pass(outline, item_id, memory_item);
 		struct ItemBody* item_body = get_itembody(outline, item_id, 0x03);
 		if (item_body) {
@@ -843,7 +904,7 @@ public:
 	/**
 	 * decompile corresponding line of code
 	 */
-	virtual void print(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		CItem::print(outline, item_id, memory_item);
 
 		struct ItemBody* item_body = get_itembody(outline, item_id, 0x03);
@@ -862,7 +923,7 @@ public:
  */
 class CVar : public CItem {
 protected:
-	void decompile_helper(class COutline* outline, uint32_t item_id,const char16_t* assigned_value) {
+	void decompile_helper(class COutline* outline, uint64_t item_id,const char16_t* assigned_value) {
 		if (get_app_output_filename() && !get_itembody(outline, item_id, 0x01)) {
 
 			const char16_t* str = outline->symbol_lookup(item_id);
@@ -893,7 +954,7 @@ protected:
 		}
 	}
 
-	void decompile_number(class COutline* outline, uint32_t item_id, void (*sprint_num)(char*,const struct SalNumber*)){
+	void decompile_number(class COutline* outline, uint64_t item_id, void (*sprint_num)(char*,const struct SalNumber*)){
 		if (get_app_output_filename() && !get_itembody(outline, item_id, 0x01)) {
 			char buf[300];
 			*buf = 0;
@@ -928,7 +989,7 @@ public:
 	/**
 	 * handle array
 	 */
-	virtual void print(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		CItem::print(outline, item_id, memory_item);
 		CItem::print_array_boundaries(outline, item_id);
 	}
@@ -944,7 +1005,7 @@ public:
 	CNumber() : CVar("Number:") {
 	}
 
-	virtual void print(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		CItem::print(outline, item_id, memory_item);
 
 		struct ItemBody* item_body = get_itembody(outline, item_id, 0x2e);
@@ -954,7 +1015,7 @@ public:
 		}
 	}
 
-	virtual void decompile(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void decompile(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		if (get_app_output_filename() && !get_itembody(outline, item_id, 0x01)) {
 			decompile_number(outline, item_id, sprint_number);
 		}
@@ -972,7 +1033,7 @@ public:
 	CDateTime() : CVar("Date/Time:") {
 	}
 
-	virtual void print(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		CItem::print(outline, item_id, memory_item);
 
 		struct ItemBody* item_body = get_itembody(outline, item_id, 0x2e);
@@ -982,7 +1043,7 @@ public:
 		}
 	}
 
-	virtual void decompile(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void decompile(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		if (get_app_output_filename() && !get_itembody(outline, item_id, 0x01)) {
 			decompile_number(outline, item_id, sprint_date);
 		}
@@ -1000,7 +1061,7 @@ public:
 	CBoolean() : CVar("Boolean:") {
 	}
 
-	virtual void print(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		CItem::print(outline, item_id, memory_item);
 
 		struct ItemBody* item_body = get_itembody(outline, item_id, 0x2e);
@@ -1009,7 +1070,7 @@ public:
 		}
 	}
 
-	virtual void decompile(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void decompile(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		if (get_app_output_filename() && !get_itembody(outline, item_id, 0x01)) {
 			decompile_number(outline, item_id, sprint_bool);
 		}
@@ -1027,7 +1088,7 @@ public:
 	CString() : CVar("String:") {
 	}
 
-	virtual void print(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		CItem::print(outline, item_id, memory_item);
 
 		struct ItemBody* item_body = get_itembody(outline, item_id, 0x2e);
@@ -1042,30 +1103,33 @@ public:
 		}
 	}
 
-	virtual void decompile(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void decompile(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		if (get_app_output_filename() && !get_itembody(outline, item_id, 0x01)) {
 			const struct String* str = NULL;
 			struct ItemBody* item_body = get_itembody(outline, item_id, 0x2e);
 			if (item_body) {
 				str = outline->string_lookup(*((uint16_t*)item_body->data));
+				if (str) {
+					char16_t* quoted = alloc<char16_t*>(2*str->len+6);
+					char16_t* buf = quoted;
+					*(buf++) = '"';
+					for (size_t i=0; i<str->len; i+=2) {
+						if (!str->str[i/2]) {
+							break;
+						}
+						if (str->str[i/2] == '"' || str->str[i/2] == '\\') {
+							*(buf++) = '\\';
+						}
+						*(buf++) = str->str[i/2];
+					}
+					*(buf++) = '"';
+					*(buf++) = 0;
 
-				char16_t* quoted = alloc<char16_t*>(2*str->len+6);
-				char16_t* buf = quoted;
-				*(buf++) = '"';
-				for (size_t i=0; i<str->len; i+=2) {
-					if (!str->str[i/2]) {
-						break;
-					}
-					if (str->str[i/2] == '"' || str->str[i/2] == '\\') {
-						*(buf++) = '\\';
-					}
-					*(buf++) = str->str[i/2];
+					decompile_helper(outline, item_id, quoted);
+					free(quoted);
+				}else{
+					decompile_helper(outline, item_id, NULL);
 				}
-				*(buf++) = '"';
-				*(buf++) = 0;
-
-				decompile_helper(outline, item_id, quoted);
-				free(quoted);
 			}else{
 				decompile_helper(outline, item_id, NULL);
 			}
@@ -1087,7 +1151,7 @@ public:
 	/**
 	 * decompile corresponding line of code
 	 */
-	virtual void print(class COutline* outline, uint32_t item_id, uint32_t* memory_item){
+	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		CItem::print(outline, item_id, memory_item);
 
 		AVOID_COMPILED_UNCOMPILED_DUPLICATES
@@ -1105,7 +1169,7 @@ public:
 	virtual ~COn() {
 	}
 
-	void decompile(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+	void decompile(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 		if (get_app_output_filename()) {
 			// replace 0x2f itembody by string itembody
 			struct ItemBody* item_body = get_itembody(outline, item_id, 0x2f);
@@ -1126,7 +1190,7 @@ public:
 class CClassDefinitions : public CItem {
 private:
 
-	static void callback0(class COutline* outline, uint32_t item, void* param) {
+	static void callback0(class COutline* outline, uint64_t item, void* param) {
 		struct ItemBody* item_body = get_itembody(outline, item, 0x0d);
 		if (item_body) {
 			uint32_t class_id = *((uint32_t*)&item_body->size);
@@ -1139,10 +1203,10 @@ private:
 		outline->find_children_of_type_and_run(callback1, &item, item, type, false);
 	}
 
-	static void callback1(class COutline* outline, uint32_t item, void* param) {
+	static void callback1(class COutline* outline, uint64_t item, void* param) {
 		outline->find_children_of_type_and_run(callback2, param, item, NULL, false);
 	}
-	static void callback2(class COutline* outline, uint32_t item, void* param) {
+	static void callback2(class COutline* outline, uint64_t item, void* param) {
 		addvar(outline, *(uint32_t*)param, varscope::STATIC_CLASS_VAR, item);
 	}
 
@@ -1150,7 +1214,7 @@ public:
 	CClassDefinitions(const char* str) : CItem(str) {
 	}
 
-	virtual void first_pass(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+	virtual void first_pass(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 		CItem::first_pass(outline, item_id, memory_item);
 		outline->find_children_of_type_and_run(callback0, NULL, item_id, NULL, false);
 	}
@@ -1160,12 +1224,12 @@ public:
 };
 
 
-void CGlobalDecs::callback0(class COutline* outline, uint32_t item, void* param) {
+void CGlobalDecs::callback0(class COutline* outline, uint64_t item, void* param) {
 	// process all variables declared inside this node
 	outline->find_children_of_type_and_run(callback1, param, item, 0, false);
 }
 
-void CGlobalDecs::callback1(class COutline* outline, uint32_t item, void* param) {
+void CGlobalDecs::callback1(class COutline* outline, uint64_t item, void* param) {
 	addvar(outline, *(uint32_t*)param, varscope::LIB_GLOBALS, item);
 }
 
@@ -1174,7 +1238,7 @@ uint32_t CGlobalDecs::lib_globals = 0;
 CGlobalDecs::CGlobalDecs(const char* str) : CItem(str) {
 }
 
-void CGlobalDecs::first_pass(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CGlobalDecs::first_pass(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	CItem::first_pass(outline, item_id, memory_item);
 	uint16_t types[] = {
 			Item::Type::VARIABLES,
@@ -1186,7 +1250,7 @@ void CGlobalDecs::first_pass(class COutline* outline, uint32_t item_id, uint32_t
 	outline->find_children_of_type_and_run(callback0, &lib_globals, item_id, types, false);
 }
 
-void CGlobalDecs::preprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CGlobalDecs::preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	CItem::preprocess(outline, item_id, memory_item);
 }
 
@@ -1195,41 +1259,40 @@ CGlobalDecs::~CGlobalDecs() {
 
 
 // process top node of variable scope
-void CVarScope::callback1(class COutline* outline, uint32_t item, void* param) {
+void CVarScope::callback1(class COutline* outline, uint64_t item, void* param) {
 	// process all variables declared inside this node
 	outline->find_children_of_type_and_run(callback2, param, item, NULL, false);
 }
 // process single variable node
-void CVarScope::callback2(class COutline* outline, uint32_t item, void* param) {
+void CVarScope::callback2(class COutline* outline, uint64_t item, void* param) {
 	struct Params* params = (struct Params*) param;
 	addvar(outline, *params->memory_item, *params->var_scope, item);
 }
 
 
-
 CVarScope::CVarScope(const char* str, const struct MatchItemsToScope* scope) : CItem(str), scope(scope) {
 }
 
-void CVarScope::first_pass(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CVarScope::first_pass(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	CItem::first_pass(outline, item_id, memory_item);
 	for (size_t i=0; scope[i].sc != varscope::NONE; i++) {
 		uint16_t type[] = {
 				scope[i].item_type,
 				0
 		};
-		struct CVarScope::Params p = {type, &scope[i].sc, &item_id}; // @suppress("Invalid arguments")
+		struct CVarScope::Params p = {type, &scope[i].sc, &item_id};
 		outline->find_children_of_type_and_run(callback1, &p, item_id, type);
 	}
 }
 
-void CVarScope::preprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CVarScope::preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	for (size_t i=0; scope[i].sc != varscope::NONE; i++) {
 		memory_item[scope[i].sc] = item_id;
 	}
 	CItem::preprocess(outline, item_id, memory_item);
 }
 
-void CVarScope::postprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CVarScope::postprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	/*
 	for (size_t i=0; scope[i].sc != varscope::NONE; i++) {
 	}
@@ -1241,12 +1304,12 @@ CVarScope::~CVarScope() {
 
 
 const struct MatchItemsToScope CCLASS_TYPES[2] = {{varscope::CURRENT_OBJECT, Item::Type::INSTANCE_VARIABLES},{varscope::NONE,0}};
-void CClass::callback3(class COutline* outline, uint32_t item, void* param) {
+void CClass::callback3(class COutline* outline, uint64_t item, void* param) {
 		// process all variables declared inside this node
 		outline->find_children_of_type_and_run(callback4, param, item, NULL, false);
 	}
 	// process single variable node
-void CClass::callback4(class COutline* outline, uint32_t item, void* param) {
+void CClass::callback4(class COutline* outline, uint64_t item, void* param) {
 	// resolve item address, add them to scope (call CClass), find out offset...
 
 	// get variable name and memory offset
@@ -1271,7 +1334,7 @@ void CClass::callback4(class COutline* outline, uint32_t item, void* param) {
 CClass::CClass(const char* str) : CVarScope(str, CCLASS_TYPES) {
 }
 
-void CClass::first_pass(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CClass::first_pass(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	uint16_t type[] = {
 			Item::Type::DERIVED_FROM, //// TODO: there exist three different "Derived From:" items, e.g. one for interfaces... --> TODO: build app that uses them and watch instance variable access
 			Item::Type::DERIVED_FROM_INTERFACE,
@@ -1281,7 +1344,7 @@ void CClass::first_pass(class COutline* outline, uint32_t item_id, uint32_t* mem
 	CVarScope::first_pass(outline, item_id, memory_item);
 }
 
-void CClass::preprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CClass::preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	CVarScope::preprocess(outline, item_id, memory_item);
 }
 
@@ -1291,7 +1354,7 @@ CClass::~CClass() {
 CObject::CObject (const char* str) : CClass(str) {
 }
 
-uint32_t CObject::get_class(class COutline* outline, uint32_t item_id) {
+uint32_t CObject::get_class(class COutline* outline, uint64_t item_id) {
 	struct ItemBody* ib = get_itembody(outline, item_id, 0x14);
 	if (!ib) {
 		return 0;
@@ -1334,11 +1397,11 @@ uint32_t CObject::get_class(class COutline* outline, uint32_t item_id) {
 	}
 }
 
-void CObject::first_pass(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CObject::first_pass(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	CItem::first_pass(outline,item_id,memory_item);
 }
 
-void CObject::preprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CObject::preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	uint32_t it_class = get_class(outline, item_id);
 	if (!it_class) {
 		return;
@@ -1346,7 +1409,7 @@ void CObject::preprocess(class COutline* outline, uint32_t item_id, uint32_t* me
 	memory_item[varscope::CURRENT_OBJECT] = it_class;
 }
 
-void CObject::print(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CObject::print(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	uint32_t it_class = get_class(outline, item_id);
 	if (!it_class) {
 		CClass::print(outline, item_id, memory_item);
@@ -1377,6 +1440,7 @@ void CObject::print(class COutline* outline, uint32_t item_id, uint32_t* memory_
 CObject::~CObject() {
 }
 
+#ifndef TDx64
 struct MatchItemsToScope SCOPE_FUNCTION[] = {
 		{varscope::INTERNAL_FUNCTION_VAR,0x88}, // Local Variables
 		{varscope::INTERNAL_FUNCTION_PARAM,0x89}, // Parameters [intern function]
@@ -1390,18 +1454,19 @@ struct MatchItemsToScope SCOPE_CONSTRUCTOR[] = {
 		//0x0e,0x119, // Static Variables [Global]
 		{varscope::NONE,0}
 };
+#endif
 
 std::stack<uint32_t> CDlg::cur_dlg_item = std::stack<uint32_t>();
 
 CDlg::CDlg(const char* str) : CObject(str) {
 }
 
-void CDlg::callback0(class COutline* outline, uint32_t item, void* param) {
+void CDlg::callback0(class COutline* outline, uint64_t item, void* param) {
 	struct Params* params = (struct Params*) param;
 	outline->find_children_of_type_and_run(callback1, param, item, params->type);
 }
 
-void CDlg::first_pass(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CDlg::first_pass(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	CObject::first_pass(outline, item_id, memory_item);
 	const struct MatchItemsToScope scope[] = {
 			{varscope::CURRENT_FORM, 0x0076},
@@ -1415,7 +1480,7 @@ void CDlg::first_pass(class COutline* outline, uint32_t item_id, uint32_t* memor
 	uint16_t type1[] = {0x10e, 0x00};
 	uint16_t type2[] = {0x072, 0x00};
 	varscope sc = varscope::CURRENT_FORM;
-	struct CVarScope::Params p = {type2, &sc, &item_id}; // @suppress("Invalid arguments")
+	struct CVarScope::Params p = {type2, &sc, &item_id};
 	outline->find_children_of_type_and_run(callback0, &p, item_id, type1);
 
 	uint32_t object_class = CObject::get_class(outline, item_id);
@@ -1426,15 +1491,15 @@ void CDlg::first_pass(class COutline* outline, uint32_t item_id, uint32_t* memor
 	cur_dlg_item.push(item_id);
 }
 
-void CDlg::preprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CDlg::preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	CObject::preprocess(outline, item_id, memory_item);
 	memory_item[varscope::CURRENT_FORM] = item_id;
 	cur_dlg_item.push(item_id);
 }
 
-void CDlg::postprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item) {
+void CDlg::postprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	if (cur_dlg_item.top() != item_id || cur_dlg_item.empty()) {
-		throw std::exception();
+		//throw std::exception(); // FIXME: why does this occur for 64bit app??
 	}
 	cur_dlg_item.pop();
 	CObject::postprocess(outline, item_id, memory_item);
@@ -1488,7 +1553,7 @@ CItem* tag_items[TAG_ITEMS_AMOUNT] = {
 		new CItem("Border Color:"),
 		new CItem("Border Style:"),
 		new CItem("Border Thickness:"),
-		new CBreak(),
+		new CBreak("Break"),
 		new CItem("Check Box"),
 		new CStatement("Checked when:", datatype::_BOOLEAN),
 		new CItem("Display Settings"),
@@ -1574,7 +1639,7 @@ CItem* tag_items[TAG_ITEMS_AMOUNT] = {
 		new CItem("Group Separator"),
 		new CItem("Helps"),
 		new CItem("Icon File:"),
-		new CStatement("If"),
+		new CStatement("If", datatype::_BOOLEAN),
 		new CItem("Libraries"),
 		new CItem("File Include:"),
 		new CItem("Initial State:"),
@@ -2196,5 +2261,14 @@ CItem* tag_items[TAG_ITEMS_AMOUNT] = {
 		new CItem("Dynalink Grid Window:"),
 		new CItem("Thread Report Error"),
 		new CItem("Always Show Drop Button?"),
-		new CItem("MDI Tabs:")
+		new CItem("MDI Tabs:"),
+		new CItem("Anchoring Enabled?"),
+		new CItem("Vertical Anchor:"),
+		new CItem("Horizontal Anchor:"),
+		new CItem("Minimum Height:"),
+		new CItem("Minimum Width:"),
+		new CBreak("Continue"),
+		new CItem("ForEach"),
+		new CItem("Anchor Maximum Width:"),
+		new CItem("Anchor Maximum Height:")
 };

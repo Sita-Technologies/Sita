@@ -17,23 +17,41 @@
  * <https://www.gnu.org/licenses/>.
  */
 
+#undef INC_ITEM_HPP_
+#ifndef TDx64
 #ifndef DECOMPILE_HPP_
+#define INC_ITEM_HPP_
 #define DECOMPILE_HPP_
+#endif
+#endif
+
+#ifdef TDx64
+#ifndef DECOMPILE64_HPP_
+#define INC_ITEM_HPP_
+#define DECOMPILE64_HPP_
+#endif
+#endif
+
+#ifdef INC_ITEM_HPP_
+
 #include "outline_decs.hpp"
 #include "sal_datatypes.hpp"
 #include "item.hpp"
 
+#include "def64.inc"
+
 struct DecompileInfo {
 	class COutline* outline;
-	uint32_t* memory_item;
+	uint64_t* memory_item;
 	struct CompileBlock* compile_block;
 	struct tagOPERATOR* expression;
 	datatype expected_return_type;
 	varscope var_scope;
 	uint8_t outer_precedence;
-	uint32_t* result_info; // a value that may be returned by the decompile-function
+	uint64_t* result_info; // a value that may be returned by the decompile-function
 };
 
 void decompile_expression(struct DecompileInfo di);
 
-#endif /* DECOMPILE_HPP_ */
+#endif
+#undef INC_ITEM_HPP_

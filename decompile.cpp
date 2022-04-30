@@ -44,6 +44,7 @@
 
 extern const char* DispatchArray[];
 extern void (*DispatchFunction[])(struct DecompileInfo di);
+struct tagOPERATOR* ParseGetNthOperand(struct CompileBlock* compile_block, struct tagOPERATOR* expression, uint8_t num);
 
 datatype get_datatype_from_declaration(class COutline* outline, uint32_t item) {
 	tagITEM* p_item = outline->get_item(item);
@@ -114,6 +115,7 @@ struct DecompileInfo adapt_dcinfo(struct DecompileInfo di, struct tagOPERATOR* e
 	return di;
 }
 
+#ifndef TDx64
 struct tagOPERATOR* ParseGetNthOperand(struct CompileBlock* compile_block, struct tagOPERATOR* expression, uint8_t num) {
 	if (expression->XOperandCount == 0) {
 		return 0;
@@ -127,15 +129,16 @@ struct tagOPERATOR* ParseGetNthOperand(struct CompileBlock* compile_block, struc
 	}
 	return (struct tagOPERATOR*)((char*)compile_block + offset);
 }
+#endif
 
-uint32_t print_var_name(uint16_t memory_address, varscope var_scope, uint32_t* memory_item, class COutline* outline) {
+uint64_t print_var_name(uint16_t memory_address, varscope var_scope, uint64_t* memory_item, class COutline* outline) {
 	if (var_scope == varscope::GLOBAL_SEGMENT
 			&& memory_address < max_system_var
 			&& system_vars[memory_address]) {
 		oputs(system_vars[memory_address]);
 		return 0;
 	}
-	uint32_t declared_at = outline->lookup_variable(memory_item[var_scope], var_scope, memory_address);
+	uint64_t declared_at = outline->lookup_variable(memory_item[var_scope], var_scope, memory_address);
 	if (var_scope == LIB_GLOBALS && !declared_at) {
 		declared_at = outline->lookup_variable(CGlobalDecs::lib_globals, var_scope, memory_address);
 	}
@@ -207,7 +210,7 @@ void PrintVar(struct DecompileInfo di, datatype var_type, uint16_t remaining_ope
 		PrintClassVar(di);
 	}else if (di.expression->XOperandCount == 2+remaining_operands
 			&& di.var_scope == varscope::DS_OF_OPERATOR) {
-		uint32_t resultinfo = 0x00;
+		uint64_t resultinfo = 0x00;
 		struct DecompileInfo di2 = adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), WINDOW_HANDLE);
 		di2.result_info = &resultinfo;
 		decompile_expression(di2);
@@ -222,7 +225,8 @@ void PrintVar(struct DecompileInfo di, datatype var_type, uint16_t remaining_ope
 			oputs(".");
 			uint32_t var_address = *((uint32_t*)((uint8_t*)di.compile_block + ParseGetNthOperand(di.compile_block, di.expression, 1)->XBuffer));
 			if (di.result_info) {
-				*di.result_info = var_address;
+				//*di.result_info = var_address;
+				*di.result_info = di.outline->lookup_variable(resultinfo, varscope::CURRENT_FORM, var_address);
 			}
 			const char16_t* var_name = di.outline->symbol_lookup(di.outline->lookup_variable(resultinfo, varscope::CURRENT_FORM, var_address));
 			if (var_name) {
@@ -249,7 +253,7 @@ void PrintDlgItem(struct DecompileInfo di, uint16_t remaining_operands, uint16_t
 		oputs("???");
 		return;
 	}
-	uint32_t last_dlgitem = 0;
+	uint64_t last_dlgitem = 0;
 	if (di.expression->XOperandCount == offset+1+remaining_operands) {
 		if (!CDlg::cur_dlg_item.empty()) {
 				last_dlgitem = CDlg::cur_dlg_item.top();
@@ -289,7 +293,7 @@ void Const(struct DecompileInfo di) {
 
 		if (di.var_scope == varscope::DYN_LIB) {
 			uint16_t var_address = ((uint16_t*)((char*)di.compile_block + di.expression->XBuffer))[1];
-			uint32_t item = di.outline->get_dynalib_var(memory_address, var_address);
+			uint64_t item = di.outline->get_dynalib_var(memory_address, var_address);
 			if (di.result_info) {
 				*di.result_info = item;
 			}
@@ -302,7 +306,7 @@ void Const(struct DecompileInfo di) {
 			}
 			oprintf("sc10_%04x_%04x",memory_address,var_address);
 		}else{
-			uint32_t declared_at = print_var_name(memory_address, di.var_scope, di.memory_item, di.outline);
+			uint64_t declared_at = print_var_name(memory_address, di.var_scope, di.memory_item, di.outline);
 			if (di.result_info) {
 				*di.result_info = declared_at;
 			}
@@ -422,7 +426,7 @@ struct Params {
 	struct FuncParams* fp;
 };
 
-static void callback2(class COutline* outline, uint32_t item, void* param) {
+static void callback2(class COutline* outline, uint64_t item, void* param) {
 	struct Params* par = (struct Params*)param;
 	if (*par->i >= par->fp->num) {
 		return;
@@ -431,26 +435,26 @@ static void callback2(class COutline* outline, uint32_t item, void* param) {
 	(*par->i)++;
 }
 
-static void callback1(class COutline* outline, uint32_t item, void* param) {
+static void callback1(class COutline* outline, uint64_t item, void* param) {
 	uint8_t i = 0;
 	struct FuncParams* fp = (struct FuncParams*)param;
 	struct Params par = {&i, fp};
 	outline->find_children_of_type_and_run(callback2, &par, item, NULL, false);
 }
 
-static void callback4(class COutline* outline, uint32_t item, void* param) {
+static void callback4(class COutline* outline, uint64_t item, void* param) {
 	uint32_t* return_type = *(uint32_t**)param;
 	*return_type = item;
 }
 
-static void callback3(class COutline* outline, uint32_t item, void* param) {
+static void callback3(class COutline* outline, uint64_t item, void* param) {
 	outline->find_children_of_type_and_run(callback4, param, item, NULL);
 }
 
 void IntFunction(struct DecompileInfo di) {
 	struct tagOPERATOR* infun = ParseGetNthOperand(di.compile_block, di.expression, 0);
 
-	uint32_t* return_type = di.result_info;
+	uint64_t* return_type = di.result_info;
 
 	struct FuncParams p;
 	p.num = di.expression->XOperandCount / 2;
@@ -460,12 +464,13 @@ void IntFunction(struct DecompileInfo di) {
 		p.param = NULL;
 	}
 
-	uint32_t func_item = 0;
+	uint64_t func_item = 0;
 	if (!infun) {
 		oputs("NULL(");
 	}else if (infun->XOPType != 0x00 && infun->XOPType != 0xa9) {
 		di.result_info = &func_item;
 		decompile_expression(adapt_dcinfo(di, infun, datatype::INTFUNCLASS));
+		di.result_info = return_type;
 		oputs("(");
 	}else{
 		struct tagINTFUNHITEMS* intfun = (struct tagINTFUNHITEMS*)((char*)di.compile_block + infun->XBuffer);
@@ -480,9 +485,8 @@ void IntFunction(struct DecompileInfo di) {
 			}
 			print_utf16(ret);
 		}else{
-			oprintf("__FUN_NULL@0x%08x__",intfun->hItemDoActions);
+			oprintf("__INT_FUN@0x%08x",intfun->hItemDoActions);
 		}
-
 		oputs("(");
 	}
 
@@ -530,7 +534,7 @@ void ExtFunction(struct DecompileInfo di) {
 		if (exfun_info->hItemLibrary == 0x00) {
 			// embedded library
 			// TODO: define expected parameter types in sal_functions.h and use them here
-			if (exfun_info->AccessKey<1423) {
+			if (exfun_info->AccessKey<NUM_INT_LOCALS) {
 				oprintf("%s(",INT_LOCALS[exfun_info->AccessKey].name);
 			}else{
 				// invalid function
@@ -542,7 +546,7 @@ void ExtFunction(struct DecompileInfo di) {
 			if (ret) {
 				print_utf16(ret, strlen_utf16(ret));
 			}else{
-				oprintf("__FUN_NULL@0x%08x__",exfun_info->hItemFun);
+				oprintf("__EXT_FUN@0x%08x",exfun_info->hItemFun);
 			}
 			oputs("(");
 		}
@@ -1047,7 +1051,7 @@ void GetUDVHan(struct DecompileInfo di) {
 	if (di.expression->XOperandCount == 2) {
 		//oputs("GetUDVHan(");
 		// TODO: we need the concrete type/class-definition of the object reference returned by this call!! otherwise we couldn't resolve memory-address to identifier
-		uint32_t var_decl = 0;
+		uint64_t var_decl = 0;
 		di.result_info = &var_decl;
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ANY)); // TODO: Handle type??
 		uint32_t class_def = 0;
@@ -1057,16 +1061,19 @@ void GetUDVHan(struct DecompileInfo di) {
 				class_def = (*(uint32_t*)&item_body->data[4]);
 			}
 		}
-		oputs(".");
 		struct tagOPERATOR* op = ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-1);
 		uint32_t offset = *(uint32_t*)(((uint8_t*)di.compile_block + op->XBuffer));
 		uint32_t vardef = di.outline->lookup_variable(class_def, varscope::CURRENT_OBJECT, offset, false);
 		const char16_t* varname = di.outline->symbol_lookup(vardef);
 
 		if (varname) {
+			oputs(".");
 			print_utf16(varname);
-		}else{
+		}else if (offset){
+			oputs(".");
 			oprintf("[GetUDVHan]offset0x%08x",offset);
+		}else{
+			// probably the object itself is referenced
 		}
 		//oputs(")");
 		return;
@@ -1158,7 +1165,7 @@ void PutUDVHan(struct DecompileInfo di) {
 
 void AdjUDVHan(struct DecompileInfo di) {
 	if (di.expression->XOperandCount == 2) {
-		uint32_t var_decl = 0;
+		uint64_t var_decl = 0;
 		di.result_info = &var_decl;
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), UDV));
 		uint32_t var_type = CItem::get_funcvar_typedef(di.outline, var_decl);
@@ -1301,7 +1308,12 @@ void IntFunSetupClassObject(struct DecompileInfo di) {
 	if (di.expected_return_type != INTFUNCLASS) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount == 3) {
+	if (di.expression->XOperandCount == 4) {
+			decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 2), ANY)); // TODO: Handle type??
+			oputs(".");
+			decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ITEM_REFERENCE));
+			return;
+		}else if (di.expression->XOperandCount == 3) {
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 2), SCOPE_REFERENCE)); // TODO: Handle type??
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ITEM_REFERENCE));
 		return;
@@ -2774,13 +2786,14 @@ void CnvToBoolean(struct DecompileInfo di) {
 
 void ArrayObjectVar(struct DecompileInfo di) {
 	// may occur in Set statement with 4 parameters or in other statements with 3 parameters
+	uint32_t var = 0;
 	if (di.expression->XOperandCount == 3 || di.expression->XOperandCount == 4) {
 
 		PRECEDENCE(PRECEDENCE_ASSIGN);
 		oputs((di.expression->XOperandCount == 4 && print_brackets)?"(":"");
 
 		// TODO: type?? --> array-reference
-		uint32_t resultinfo = 0;
+		uint64_t resultinfo = 0;
 		struct DecompileInfo di2 = adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ANY);
 		di2.result_info = &resultinfo;
 		decompile_expression(di2);
@@ -2796,7 +2809,7 @@ void ArrayObjectVar(struct DecompileInfo di) {
 					uint32_t class_type = *(uint32_t*)&item_body->data[4];
 					struct tagOPERATOR* op = ParseGetNthOperand(di.compile_block, di.expression, 2);
 					uint32_t offset = *(uint32_t*)(((uint8_t*)di.compile_block + op->XBuffer));
-					uint32_t var = di.outline->lookup_variable(class_type, varscope::CURRENT_OBJECT, offset, false);
+					var = di.outline->lookup_variable(class_type, varscope::CURRENT_OBJECT, offset, false);
 					if (var) {
 						// TODO: extract variable type
 						const char16_t* str = di.outline->symbol_lookup(var);
@@ -2819,7 +2832,7 @@ void ArrayObjectVar(struct DecompileInfo di) {
 			oputs(" = ");
 			di.outer_precedence = PRECEDENCE_ASSIGN - 1;
 			// TODO: pass variable type!!!
-			decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 3), ANY));
+			decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 3), get_datatype_from_declaration(di.outline,var)));
 			oputs(print_brackets?")":"");
 		}
 		return;
@@ -2831,7 +2844,8 @@ void ArrayObjectAddress(struct DecompileInfo di) {
 	if (di.expression->XOperandCount == 3) {
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ANY));
 		oputs("[");
-		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 1), ANY));
+		di.outer_precedence = PRECEDENCE_MAX;
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 1), NUMBER));
 		oputs("]");
 		return;
 	}
@@ -3098,6 +3112,7 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		__not_implemented_yet  // undefined
 };
 
+#ifndef TDx64
 const char* DispatchArray[] = {
 		"Const",
 		"Add",
@@ -3356,3 +3371,4 @@ const char* DispatchArray[] = {
 		"undefined",
 		"undefined",
 };
+#endif

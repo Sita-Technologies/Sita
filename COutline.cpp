@@ -35,7 +35,7 @@
 #error "neither Unix nor Windows environment defined"
 #endif
 
-uint32_t COutline::insert_item(uint16_t seginf) {
+uint64_t COutline::insert_item(uint32_t seginf) {
 	if (!seginf) {
 		return 0;
 	}
@@ -53,10 +53,10 @@ uint32_t COutline::insert_item(uint16_t seginf) {
 		return 0;
 	}
 	hand_table[seginf] = newht;
-	newht[tag_oseg[seginf]->seghd_maxUsedHandle].size = (0x4000 | (1+(sizeof(struct tagITEM)+sizeof(struct tagHEAPBLK)-1)/sizeof(struct tagHEAPBLK)));
-	newht[tag_oseg[seginf]->seghd_maxUsedHandle].handle_data = alloc<struct tagITEM*>(((newht[tag_oseg[seginf]->seghd_maxUsedHandle].size&0x3fff)-1)*4);
+	newht[tag_oseg[seginf]->seghd_maxUsedHandle].size = ((HANDTABLE_ITEMSIZE_MASK+1) | (1+(sizeof(struct tagITEM)+4-1)/4));
+	newht[tag_oseg[seginf]->seghd_maxUsedHandle].handle_data = alloc<struct tagITEM*>(((newht[tag_oseg[seginf]->seghd_maxUsedHandle].size&HANDTABLE_ITEMSIZE_MASK)-1)*4);
 	newht[tag_oseg[seginf]->seghd_maxUsedHandle].memory = alloc<struct RuntimeMemory*>(sizeof(struct RuntimeMemory));
-	return ((uint32_t)tag_oseg[seginf]->seghd_maxUsedHandle) | (((uint32_t)seginf)<<16);
+	return ((uint64_t)tag_oseg[seginf]->seghd_maxUsedHandle) | (((uint64_t)seginf)<<ITEM_ID_WIDTH);
 }
 
 COutline::COutline(FILE* handle) : handle(handle) {
@@ -99,6 +99,15 @@ COutline::COutline(FILE* handle) : handle(handle) {
 		exit(1); // 64bit not supported
 	}
 
+#ifndef TDx64
+	if (this->file_hdr.flags & FLAG_IS_64BIT) {
+		if (is_verbose()) {
+			printf("stopped 32bit loading of binary with 64bit flag set\n");
+		}
+		return;
+	}
+#endif
+
 	// read outline
 	this->outline = alloc<struct Outline*>(this->file_hdr.outline_alloc);
 	fread_or_throw(this->outline, this->file_hdr.outline_alloc, handle);
@@ -112,9 +121,13 @@ COutline::COutline(FILE* handle) : handle(handle) {
 
 	// read list of forms/Windows that should be loaded on startup
 	if (this->file_hdr.run_only == RUN_ONLY) {
+#ifdef TDx64
+		uint64_t form_item;
+#else
 		uint32_t form_item;
+#endif
 		do {
-			fread_or_throw(&form_item, 4, handle);
+			fread_or_throw(&form_item, sizeof(form_item), handle);
 			/*
 			if (form_item) {
 				// TODO: store list of active windows somewhere...?
@@ -162,7 +175,7 @@ COutline::COutline(FILE* handle) : handle(handle) {
 	// each of them may refer to a HandTable
 	this->hand_table = alloc<struct HandTable**>(sizeof(void*)*(outline->seg_inf_limit+1));
 	this->tag_oseg = alloc<struct tagOSEG**>(sizeof(void*)*(outline->seg_inf_limit+1));
-	uint32_t item_id = 1;
+	uint64_t item_id = 1;
 	if (is_verbose()) {
 		oputs("===== HITEMS =====\n");
 	}
@@ -280,6 +293,7 @@ COutline::COutline(FILE* handle) : handle(handle) {
 	this->init_symbol_lookup();
 
 	// read HStringTable /// seems to be padded to an offset modulo 4 == 0
+	this->string_table = 0;
 	if (this->outline->h_string_tables) {
 		fseek_or_throw(handle,offset+this->outline->h_string_tables);
 		if (file_hdr.version >= VERSION_TD70) {
@@ -290,13 +304,6 @@ COutline::COutline(FILE* handle) : handle(handle) {
 		if (this->cmphdr.uncomp_size != 0) {
 			this->str_data = alloc<char*>(this->cmphdr.uncomp_size);
 			this->OsReadFast(this->cmphdr.uncomp_size, str_data);
-			if (is_verbose()) {
-				FILE* strdump = fopen("strdump.bin","wb");
-				if (strdump) {
-					fwrite(str_data,1,this->cmphdr.uncomp_size,strdump);
-					fclose(strdump);
-				}
-			}
 			this->string_table = (struct StringTable*)(&str_data[this->cmphdr.hstring_size]);
 		}
 	}
@@ -551,17 +558,22 @@ uint32_t COutline::save(FILE* handle) {
 			if (this->hand_table[i]) {
 				for (uint16_t j=1; j<=this->tag_oseg[i]->seghd_maxUsedHandle; j++) {
 					if (this->hand_table[i][j].handle_data) {
-						size += (this->hand_table[i][j].size & 0x3fff);
+						if ((this->hand_table[i][j].size & HANDTABLE_ITEMSIZE_MASK) < (sizeof(struct tagHEAPBLK)+4-1)/4) {
+							fprintf(stderr,"error: handtable[0x%04x][0x%04x].size too small\n",i,j);
+							size += (sizeof(struct tagHEAPBLK)+4-1)/4;
+						}else{
+							size += (this->hand_table[i][j].size & HANDTABLE_ITEMSIZE_MASK);
+						}
 					}else{
 						this->hand_table[i][j].size = 0;
 					}
 				}
 			}
-			uint16_t header_size = (sizeof(struct tagOSEG) + sizeof(struct tagHEAPBLK) - 1)/sizeof(struct tagHEAPBLK);
-			uint16_t footer_size = 2;
+			uint32_t header_size = (sizeof(struct tagOSEG) + 4-1)/4;
+			uint32_t footer_size = (sizeof(struct tagHEAPBLK)+4-1)/4 + 1;
 
 			// allocate memory and update item size
-			item.size = sizeof(struct tagHEAPBLK)*(size + header_size + footer_size);
+			item.size = 4*(size + header_size + footer_size);
 			oseg = alloc<struct tagOSEG*>(item.size);
 			if (!oseg) {
 				throw new std::bad_alloc();
@@ -569,36 +581,47 @@ uint32_t COutline::save(FILE* handle) {
 
 			// fill tagOSEG header
 			memcpy(oseg,this->tag_oseg[i],sizeof(struct tagOSEG));
-			oseg->seghd_shStartDynamic = header_size*sizeof(struct tagHEAPBLK);
+			oseg->seghd_shStartDynamic = header_size*4;
 
 			// copy data from handtable items to tagOSEG body
-			uint32_t offset = header_size;
+			uint64_t offset = header_size;
 			if (this->hand_table[i]) {
-				for (uint16_t j=1; j<=this->tag_oseg[i]->seghd_maxUsedHandle; j++) {
+				for (uint32_t j=1; j<=this->tag_oseg[i]->seghd_maxUsedHandle; j++) {
 					if (this->hand_table[i][j].handle_data) {
-						struct tagHEAPBLK* ptr = (struct tagHEAPBLK*)&((char*)oseg)[sizeof(struct tagHEAPBLK)*offset];
+						if (offset + (sizeof(struct tagHEAPBLK)+4-1)/4 > size + header_size) {
+							fprintf(stderr,"size counting failure\n");
+							break;
+						}
+						struct tagHEAPBLK* ptr = (struct tagHEAPBLK*)&((char*)oseg)[4*offset];
 						ptr->handle_id = j;
 						ptr->value = this->hand_table[i][j].size;
 						uint32_t copy_size = 0;
-						if (this->hand_table[i][j].size & 0x4000) {
+						if (this->hand_table[i][j].size & (HANDTABLE_ITEMSIZE_MASK+1)) {
 							copy_size = this->hand_table[i][j].handle_data->data_length + sizeof(struct tagITEM);
 						}else{
-							copy_size = (this->hand_table[i][j].size & 0x3fff) * sizeof(struct tagHEAPBLK);
+							copy_size = (this->hand_table[i][j].size & HANDTABLE_ITEMSIZE_MASK) * 4;
+							if (copy_size < sizeof(struct tagHEAPBLK)) {
+								copy_size = sizeof(struct tagHEAPBLK);
+								fprintf(stderr,"item size failure\n");
+								break;
+							}
+							copy_size -= sizeof(struct tagHEAPBLK);
 						}
-						if (copy_size > sizeof(struct tagHEAPBLK)*(this->hand_table[i][j].size & 0x3fff)) {
+						if (copy_size+sizeof(struct tagHEAPBLK) > 4*(this->hand_table[i][j].size & HANDTABLE_ITEMSIZE_MASK)) {
 							fprintf(stderr,"size counting failure\n");
 							continue;
 						}
 						memcpy(&ptr->data,this->hand_table[i][j].handle_data,copy_size);
 
-						// correct item flags -- note that only items with flag 0x4000 set have a tagITEM header structure
-						if (this->hand_table[i][j].size & 0x4000) {
+						// correct item flags -- note that only items with flag (HANDTABLE_ITEMSIZE_MASK+1) set have a tagITEM header structure
+						if ((this->hand_table[i][j].size & (HANDTABLE_ITEMSIZE_MASK+1))
+								&& (this->hand_table[i][j].size & (HANDTABLE_ITEMSIZE_MASK))*4 >= sizeof(struct tagHEAPBLK) + sizeof(struct tagITEM)) {
 
 							if ((((struct tagITEM*)&ptr->data)->flags & 0x00ff0000)) {
 								// count number of lines and set line number flag (display height)
 								((struct tagITEM*)&ptr->data)->flags &= 0xff00ffff;
 								size_t lines = 1;
-								ItemBody* str = CItem::get_itembody(this, ((i<<16)|(uint32_t)j), 0x01);
+								ItemBody* str = CItem::get_itembody(this, (((uint64_t)i<<ITEM_ID_WIDTH)|(uint64_t)j), 0x01);
 								if (str) {
 									//str->size
 									lines += count_linebreaks((const char16_t*)str->data,str->size);
@@ -619,7 +642,7 @@ uint32_t COutline::save(FILE* handle) {
 							}
 						}
 
-						offset += (this->hand_table[i][j].size & 0x3fff);
+						offset += (this->hand_table[i][j].size & HANDTABLE_ITEMSIZE_MASK);
 						if (offset > size + header_size) {
 							fprintf(stderr,"size counting failure\n");
 						}
@@ -629,7 +652,7 @@ uint32_t COutline::save(FILE* handle) {
 			// footer:
 			//   1.: size==0-item (e.g.: 0x00 0x00 0x00 0x00 item)
 			//   2.: 0x83 0x7f 0x00 0x00 item (for whatever reason...)
-			struct tagHEAPBLK* ptr = (struct tagHEAPBLK*)&((char*)oseg)[sizeof(struct tagHEAPBLK)*offset];
+			struct tagHEAPBLK* ptr = (struct tagHEAPBLK*)&((char*)oseg)[4*offset];
 			memset(ptr,0,sizeof(struct tagHEAPBLK));
 			ptr->data[0] = 0x83;
 			ptr->data[1] = 0x7f;
@@ -672,7 +695,7 @@ uint32_t COutline::save(FILE* handle) {
 	return off;
 }
 
-bool COutline::add_variable(uint32_t item_id, enum varscope scope, uint16_t offset, uint32_t reference) {
+bool COutline::add_variable(uint64_t item_id, enum varscope scope, uint16_t offset, uint32_t reference) {
 	if (!item_id) {
 		return false;
 	}
@@ -710,7 +733,7 @@ bool COutline::add_variable(uint32_t item_id, enum varscope scope, uint16_t offs
 	return true;
 }
 
-uint32_t COutline::lookup_variable(uint32_t item_id, enum varscope scope, uint16_t offset, bool print_namespace) {
+uint32_t COutline::lookup_variable(uint64_t item_id, enum varscope scope, uint16_t offset, bool print_namespace) {
 	struct RuntimeMemoryScope* rms = get_memory(item_id, scope);
 	if (!rms) {
 		return 0;
@@ -750,7 +773,7 @@ uint32_t COutline::lookup_variable(uint32_t item_id, enum varscope scope, uint16
 	}
 }
 
-void COutline::add_class_item(uint32_t class_id, uint32_t item_id) {
+void COutline::add_class_item(uint32_t class_id, uint64_t item_id) {
 	if (!this->class_map.item) {
 		this->class_map.item = alloc<uint32_t*>(sizeof(uint32_t)*(class_id+1));
 		this->class_map.size = class_id+1;
@@ -834,7 +857,7 @@ uint32_t COutline::get_dynalib_var(uint16_t libsal, uint16_t ordinal) {
 	return this->dynamlib_map.ordinal_map[libsal].item[ordinal];
 }
 
-uint32_t COutline::find_siblings_of_type_and_run(void (*callback)(class COutline*, uint32_t, void*), void* param, uint32_t item, const uint16_t* type, bool only_one_match) {
+uint32_t COutline::find_siblings_of_type_and_run(void (*callback)(class COutline*, uint64_t, void*), void* param, uint64_t item, const uint16_t* type, bool only_one_match) {
 	uint32_t callbacks = 0;
 	if (!callback) {
 		return 0;
@@ -872,7 +895,7 @@ uint32_t COutline::find_siblings_of_type_and_run(void (*callback)(class COutline
 	return callbacks;
 }
 
-uint32_t COutline::find_children_of_type_and_run(void (*callback)(class COutline*, uint32_t, void*), void* param, uint32_t item, const uint16_t* type, bool only_one_match) {
+uint32_t COutline::find_children_of_type_and_run(void (*callback)(class COutline*, uint64_t, void*), void* param, uint64_t item, const uint16_t* type, bool only_one_match) {
 	if (!item) {
 		return 0;
 	}
@@ -883,34 +906,36 @@ uint32_t COutline::find_children_of_type_and_run(void (*callback)(class COutline
 	if (!p_item) {
 		return 0;
 	}
-	uint32_t deref = this->item_pointer_dereference(item);
+	uint64_t deref = this->item_pointer_dereference(item);
 	if (deref && deref != item) {
 		return this->find_children_of_type_and_run(callback,param,deref,type,only_one_match);
 	}
-	uint32_t child = this->child_item(item);
+	uint64_t child = this->child_item(item);
 	if (child) {
 		return find_siblings_of_type_and_run(callback,param,child,type,only_one_match);
 	}
 	return 0;
 }
 
-uint32_t COutline::top_item() {
+uint64_t COutline::top_item() {
 	return outline->hItemTop;
 }
 
-uint32_t COutline::item_pointer_dereference(uint32_t item) {
+uint64_t COutline::item_pointer_dereference(uint64_t item) {
 	tagITEM* p_item = get_item(item);
 	if (!p_item) {
 		return 0;
 	}
-	if (p_item->type == Item::Type::POINTER && p_item->data[0] == 0x32) {
+	if (p_item->type == Item::Type::POINTER && p_item->data_length >= item_bodies[0x32].size && p_item->data[0] == 0x32) {
 		// is pointer
-		return this->item_pointer_dereference(*((uint32_t*)&p_item->data[1]));
+		uint64_t ptr = 0;
+		memcpy(&ptr,&p_item->data[1],item_bodies[0x32].size);
+		return this->item_pointer_dereference(ptr);
 	}
 	return item;
 }
 
-uint32_t COutline::next_item(uint32_t item_id){
+uint64_t COutline::next_item(uint64_t item_id){
 	tagITEM* item = this->get_item(item_id);
 	if (!item) {
 		return 0;
@@ -919,10 +944,10 @@ uint32_t COutline::next_item(uint32_t item_id){
 	if (!sibling) {
 		return 0;
 	}
-	return (sibling | (item_id&0xFFFF0000));
+	return (sibling | (item_id&(((1LL<<ITEM_ID_WIDTH)-1LL)<<ITEM_ID_WIDTH)));
 }
 
-uint32_t COutline::child_item(uint32_t item_id) {
+uint64_t COutline::child_item(uint64_t item_id) {
 	tagITEM* item = this->get_item(item_id);
 	if (!item) {
 		return 0;
@@ -931,25 +956,25 @@ uint32_t COutline::child_item(uint32_t item_id) {
 	if (!child) {
 		return 0;
 	}
-	return (child | (item_id&0xFFFF0000));
+	return (child | (item_id&(((1LL<<ITEM_ID_WIDTH)-1LL)<<ITEM_ID_WIDTH)));
 }
 
-tagITEM* COutline::get_item(uint32_t item_id) {
+tagITEM* COutline::get_item(uint64_t item_id) {
 	if (!item_id) {
 		return NULL;
 	}
-	uint16_t item = (item_id>>16);
+	uint32_t item = (item_id>>ITEM_ID_WIDTH);
 	if (item == 0 || item > this->outline->seg_inf_limit) {
 		return NULL;
 	}
-	uint16_t handle = (item_id&0xFFFF);
+	uint32_t handle = (item_id&((1LL<<ITEM_ID_WIDTH)-1LL));
 	if (handle == 0 || this->tag_oseg[item] == 0 || this->hand_table == 0 || this->hand_table[item] == 0 || handle > this->tag_oseg[item]->seghd_maxUsedHandle) {
 		return NULL;
 	}
 	return this->hand_table[item][handle].handle_data;
 }
 
-struct RuntimeMemoryScope* COutline::get_memory(uint32_t item_id, varscope scope) {
+struct RuntimeMemoryScope* COutline::get_memory(uint64_t item_id, varscope scope) {
 	if (!item_id) {
 		return NULL;
 	}
@@ -968,7 +993,7 @@ struct RuntimeMemoryScope* COutline::get_memory(uint32_t item_id, varscope scope
 	return NULL;
 }
 
-bool COutline::has_any_variable(uint32_t item_id, varscope scope) {
+bool COutline::has_any_variable(uint64_t item_id, varscope scope) {
 	struct RuntimeMemoryScope* sc = get_memory(item_id, scope);
 	if (!sc) {
 		return false;
@@ -1121,9 +1146,9 @@ void COutline::init_symbol_lookup() {
 	}
 }
 
-const char16_t* COutline::symbol_lookup(uint32_t item_id) {
-	uint16_t item = item_id>>16;
-	uint16_t handle = item_id&0xFFFF;
+const char16_t* COutline::symbol_lookup(uint64_t item_id) {
+	uint32_t item = item_id>>ITEM_ID_WIDTH;
+	uint32_t handle = item_id&((1LL<<ITEM_ID_WIDTH)-1);
 	if (item && item <= outline->seg_inf_limit && this->tag_oseg[item] && handle && handle <= this->tag_oseg[item]->seghd_maxUsedHandle) {
 		if (this->symbols && this->symbols[item] && this->symbols[item][handle]) {
 			return (const char16_t*)this->symbols[item][handle]->str;
@@ -1136,7 +1161,7 @@ const struct String* COutline::string_lookup(uint32_t string_id) {
 	if (this->string_table && this->string_table->str && string_id < this->string_table->total_num_entries) {
 		uint32_t offset = this->string_table->str[string_id];
 		if (offset != 0) {
-			struct String* string = (struct String*)(&this->str_data[this->string_table->str[string_id]]);
+			struct String* string = (struct String*)(&this->str_data[offset]);
 			return string;
 		}
 	}
@@ -1216,7 +1241,8 @@ unsigned long COutline::OsDeCompress(unsigned long expected_output_len, void* de
 }
 #undef IN_BYTE
 
-struct HandTable* COutline::create_handtable(struct tagOSEG* item_content, uint32_t item_id) {
+
+struct HandTable* COutline::create_handtable(struct tagOSEG* item_content, uint64_t item_id) {
 	if (item_id > this->outline->seg_inf_limit || !item_id) {
 		fprintf(stderr,"error: called create_handtable with invalid item 0x%04x\n",item_id);
 		return NULL;
@@ -1228,24 +1254,24 @@ struct HandTable* COutline::create_handtable(struct tagOSEG* item_content, uint3
 	// extract sub-handles of item!!
 	uint32_t offset = item_content->seghd_shStartDynamic;
 	struct tagHEAPBLK* iterator = (struct tagHEAPBLK*)((char*)item_content + item_content->seghd_shStartDynamic);
-	while (iterator->value & 0x3fff) {
+	while (iterator->value & HANDTABLE_ITEMSIZE_MASK) {
 		if (item->size < offset + sizeof(tagHEAPBLK)) {
 			free(hand_table);
 			fprintf(stderr,"error: iterator ran outside of tagOSEG.data (in item 0x%04x)\n",item_id);
 			throw new std::exception();
 		}
-		if (iterator->value & 0x8000) {
+		if (iterator->value & ((HANDTABLE_ITEMSIZE_MASK+1)<<1)) {
 			free(hand_table);
 			fprintf(stderr,"unsupported handle table type in item %u at 0x%08x\n",item_id,offset);
 			throw new std::exception();
 		}else{
 			if (iterator->handle_id != 0 && iterator->handle_id <= item_content->seghd_maxUsedHandle) {
-				if (offset + sizeof(struct tagHEAPBLK)*(iterator->value&0x3fff) > item->size) {
+				if (offset + 4*(iterator->value&HANDTABLE_ITEMSIZE_MASK) > item->size) {
 					free(hand_table);
 					fprintf(stderr,"error: iterator ran outside of tagOSEG.data (in item 0x%04x)\n",item_id);
 					throw new std::exception();
-				}else /* if (iterator->size & 0x4000) */ {
-					uint32_t size = sizeof(struct tagHEAPBLK) * ((iterator->value & 0x3fff)-1);
+				}else /* if (iterator->size & (HANDTABLE_ITEMSIZE_MASK+1)) */ {
+					uint32_t size = 4 * ((iterator->value & HANDTABLE_ITEMSIZE_MASK)-1);
 					hand_table[iterator->handle_id].handle_data = alloc<struct tagITEM*>(size);
 					memcpy(hand_table[iterator->handle_id].handle_data, iterator->data, size);
 					// hand_table[iterator->handle_id].handle_data = (struct tagITEM*)iterator->data;
@@ -1260,24 +1286,26 @@ struct HandTable* COutline::create_handtable(struct tagOSEG* item_content, uint3
 				fprintf(stderr,"item 0x%04x: invalid handle id: %u (must be between 1 and %u)",item_id,iterator->handle_id,item_content->seghd_maxUsedHandle);
 			}
 		}
-		offset += sizeof(struct tagHEAPBLK)*(iterator->value&0x3fff);
-		iterator += iterator->value&0x3fff;
+		offset += 4*(iterator->value&HANDTABLE_ITEMSIZE_MASK);
+		iterator = (struct tagHEAPBLK*)((char*)item_content + offset);
 		if (item->size < offset + sizeof(struct tagHEAPBLK)) {
 			free(hand_table);
 			fprintf(stderr,"error: iterator ran outside of tagOSEG.data (in item 0x%04x)\n",item_id);
 			throw new std::exception();
 		}
 	}
-	// last item of (size&0x3fff) == 0x00 seems always to be followed by: 0x83 0x7f 0x00 0x00 -- why??
+	// last item of (size&HANDTABLE_ITEMSIZE_MASK) == 0x00 seems always to be followed by: 0x83 0x7f 0x00 0x00 -- why??
 	return hand_table;
 }
 
-bool COutline::change_item_size(uint32_t item_id, uint16_t new_size) {
-
-	// struct HandTable* COutline::create_handtable(struct tagOSEG* item_content, uint32_t item_id)
-	uint16_t seginf = (item_id >> 16);
-	uint16_t handle_id = (item_id & 0xffff);
+bool COutline::change_item_size(uint64_t item_id, uint32_t new_size) {
+	// struct HandTable* COutline::create_handtable(struct tagOSEG* item_content, uint64_t item_id)
+	uint32_t seginf = (item_id >> ITEM_ID_WIDTH);
+	uint32_t handle_id = (item_id & ((1LL<<ITEM_ID_WIDTH)-1LL));
 	if (!seginf || seginf > this->outline->seg_inf_limit) {
+		if (is_verbose()) {
+			fprintf(stderr,"resize error: itemid: 0x%08x, seginf: 0x%08x\n",item_id,seginf);
+		}
 		return false;
 	}
 	struct HandTable* ht = this->hand_table[seginf];
@@ -1287,24 +1315,30 @@ bool COutline::change_item_size(uint32_t item_id, uint16_t new_size) {
 	if (!ht[handle_id].handle_data) {
 		return false;
 	}
-	if ((ht[handle_id].size & 0xc000) != 0x4000) {
+	if ((ht[handle_id].size & ((HANDTABLE_ITEMSIZE_MASK+1) * 0x03)) != (HANDTABLE_ITEMSIZE_MASK+1)) {
+		if (is_verbose()) {
+			fprintf(stderr,"resize error: itemsize: 0x%08x, mask: 0x%08x\n",ht[handle_id].size, HANDTABLE_ITEMSIZE_MASK);
+		}
 		return false; // unsupported flags
 	}
 
-	uint16_t old_size = ht[handle_id].handle_data->data_length;
+	uint32_t old_size = ht[handle_id].handle_data->data_length;
 
 	if (new_size == old_size) {
 		return true; // success: no change necessary
 	}
 
-	uint16_t old_size_ht = ht[handle_id].size;
-	uint16_t new_size_ht = ((uint32_t)new_size + sizeof(struct tagITEM) + sizeof(struct tagHEAPBLK)-1)/sizeof(struct tagHEAPBLK);
-	ht[handle_id].size = ((new_size_ht + 1) | 0x4000);
+	uint32_t old_size_ht = ht[handle_id].size;
+	uint32_t new_size_ht = ((uint64_t)new_size + sizeof(struct tagITEM) + 4LL-1LL)/4LL;
+	ht[handle_id].size = ((new_size_ht + (sizeof(struct tagHEAPBLK)+4-1)/4) | ((HANDTABLE_ITEMSIZE_MASK+1) * 0x1d));
 
 	if (ht[handle_id].size != old_size_ht) {
-		struct tagITEM* data = (struct tagITEM*)realloc(ht[handle_id].handle_data, sizeof(struct tagHEAPBLK)*new_size_ht);
+		struct tagITEM* data = (struct tagITEM*)realloc(ht[handle_id].handle_data, 4*new_size_ht);
 		if (!data) {
 			ht[handle_id].size = old_size_ht;
+			if (is_verbose()) {
+				fprintf(stderr,"resize error: realloc of size 0x%08x failed, old size: 0x%08x\n",4*new_size_ht, old_size_ht);
+			}
 			return false; // cannot realloc
 		}
 		ht[handle_id].handle_data = data;
@@ -1458,11 +1492,6 @@ void COutline::print_stats() {
 	print_flag(file_hdr.flags & FLAG_IS_64BIT, "Is 64bit");
 	print_flag(file_hdr.run_only == RUN_ONLY, "Run Only");
 	oputs("\n");
-
-	if (file_hdr.flags & FLAG_IS_64BIT) {
-		fprintf(stderr,"error: 64bit binaries are not supported\n");
-		exit(1); // 64bit not supported
-	}
 
 	oputs("Outline Flags:\n");
 	print_flag(outline->flags & OFLAG_APP_SYMBOLS_CURRENT, "App Symbols Current");
