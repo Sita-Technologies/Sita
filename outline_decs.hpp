@@ -109,6 +109,7 @@ struct OutStats {
 };
 
 typedef uint16_t SymbolHash[0x97];
+typedef uint32_t SymbolHash64[0x97];
 
 struct tagPERMSYM {
 	uint32_t hItem;
@@ -116,6 +117,16 @@ struct tagPERMSYM {
 	uint32_t hItemOwner;
 	uint8_t bDataType;
 	uint32_t lVarInfo;
+	uint32_t flags;
+	uint8_t str[0]; // utf-16 coded string, \0-terminated
+};
+
+struct tagPERMSYM64 {
+	uint64_t hItem;
+	uint32_t nItemType;
+	uint64_t hItemOwner;
+	uint8_t bDataType;
+	uint64_t lVarInfo;
 	uint32_t flags;
 	uint8_t str[0]; // utf-16 coded string, \0-terminated
 };
@@ -142,6 +153,15 @@ struct HItem{
 	uint32_t flags;
 	uint32_t unknown1;
 	uint32_t unknown2;
+};
+
+struct HItem64{
+	uint32_t offset; // (in file)
+	uint32_t size; // (decompressed!!!)
+	uint64_t segment; // Pointer to tagOSEG -----> Item-Data is loaded there
+	uint64_t flags;
+	uint64_t unknown1;
+	uint64_t unknown2;
 };
 
 struct Outline {
@@ -189,6 +209,56 @@ struct Outline {
 };
 
 
+struct Outline64 {
+	uint64_t hItemTop;
+	uint64_t hItemEdit;
+	uint64_t hItemMarkParent;
+	uint32_t lEditDataValue;
+	uint32_t nEditDataValue;
+	uint32_t nEditDataType;
+	uint32_t nEditDataList;
+	uint32_t nEditListIndex;
+	uint32_t nEditLine;
+	uint32_t nEditOldLineCount;
+	uint32_t outline_alloc; // size of Outline-Structure
+	uint32_t seg_inf_limit; // max. number of elements in SegInf (-->HITEMs)
+	uint32_t scrap_list;
+	uint32_t flags;
+	struct OutStats statistics;
+	uint32_t padding;
+	uint64_t hOutline; // 0x08
+	uint32_t process_id;
+	uint32_t h_string_tables; // offset of StringTable CompressionHeader
+	uint64_t lpHStringStaticTable;
+	uint64_t bulk_load_start;
+	uint64_t bulk_load_end;
+	uint32_t nItemTypeEdit;
+	uint32_t padding2;
+	uint64_t hItemAppDest;
+	uint64_t lpLibTable;
+	uint64_t symbol_hash;
+	uint64_t lpLibGlobals;
+	uint64_t unused;
+	uint64_t lpIncludeInfo;
+	uint32_t hResInfo;
+	uint16_t nItemTypeScrapParent;
+	uint16_t padding3;
+	uint32_t segfile_hFile;
+	uint32_t padding4;
+	uint64_t segfile_lpszSegPathName;
+	uint8_t  padding5[512];
+	uint64_t lpCodeBlockCache;
+	uint64_t lpMessageMapCache;
+	uint64_t lpSegCacheInfo;
+	uint32_t header_flags; // overwritten by FileHdr.header_flags ---> they seem to be 0x00000000 usually (see above)
+	uint32_t padding6;
+	uint64_t lpBrkptInfo;
+	uint32_t nBrkptInfoLen;
+	uint32_t padding7;
+	uint32_t reserved[2];
+	struct HItem64 data[0];
+};
+
 // if the App is "compiled" (corresponding to its Outline header): call FesSetAllClassDefaults(0) after loading the data.
 
 // after everything has been loaded, the App -- or at least its OnLoad function -- is started by calling
@@ -209,6 +279,13 @@ struct StringTable {
 	uint32_t num_free_entries;
 	uint32_t free_list;
 	uint32_t str[0]; // offset in decompressed data
+};
+
+struct StringTable64 {
+	uint32_t total_num_entries;
+	uint32_t num_free_entries;
+	uint64_t free_list;
+	uint64_t str[0]; // offset in decompressed data // TODO: uint64_t??
 };
 
 struct String {
@@ -292,6 +369,16 @@ struct tagITEM {
 	uint8_t data[0]; // one or more ItemBody elements
 };
 
+struct tagITEM64 {
+	uint16_t type;
+	uint16_t data_length;
+	uint32_t parent;
+	uint32_t next_sibling;
+	uint32_t first_child;
+	uint32_t flags;
+	uint8_t data[0]; // one or more ItemBody elements
+};
+
 struct tagHEAPBLK {
 	uint16_t value; // if high bit 0x8000 is set, a "free list" follows in data field... see OamAllocateHandleTable -> call of OamCoalesce(0,????)... not supported here;
 	// if bit 0x8000 is not set: apply 0x3fff-mask and multiply this value with 4 to get real size of item
@@ -300,6 +387,16 @@ struct tagHEAPBLK {
 	uint16_t handle_id; // at most maxUsedHandle and at least 0x01; otherwise, the entry is ignored
 	uint8_t data[0]; //tagItem-chain
 };
+
+struct tagHEAPBLK64 {
+	uint32_t value; // if high bit 0x8000000 is set, a "free list" follows in data field... see OamAllocateHandleTable -> call of OamCoalesce(0,????)... not supported here;
+	// if bit 0x8000000 is not set: apply 0x3ffffff-mask and multiply this value with 4 to get real size of item
+	// 0x4000000: OamHpTagged flag: --> tagITEM header follows in data field
+	// 0x0000000: raw data without header... a uint16_t size info may follow, at least for raw utf16-string-data
+	uint32_t handle_id; // at most maxUsedHandle and at least 0x01; otherwise, the entry is ignored
+	uint8_t data[0]; //tagItem-chain
+};
+
 
 /// The tagHEAPBLK are chained together as well...
 
@@ -317,6 +414,21 @@ struct tagOSEG{
 	uint8_t data[0]; // chain of HandMapItems
 };
 
+struct tagOSEG64{
+	uint64_t seghd_lpHandMap;
+	uint32_t seghd_shFreeList;
+	uint32_t seghd_maxUsedHandle; ///// ----> Handles in HandTable; defaults to 10 if maxUsedHandle is 0x00
+	uint32_t seghd_shStartDynamic; ////// Address of first HandMapItem (offset from tagOSEG's offset)
+	uint32_t seghd_padding;
+	uint64_t ohCloneItem; // pointer to HITEM__
+	uint32_t ohItemCount;
+	uint32_t padding;
+	uint64_t ohhOutline; // pointer to HOUTLINE__
+	uint32_t ohSegInf;
+	uint32_t padding2;
+	uint8_t data[0]; // chain of HandMapItems
+};
+
 struct RuntimeMemoryScope {
 	uint16_t current_size;
 	uint32_t* item_id;
@@ -329,6 +441,12 @@ struct RuntimeMemory {
 struct HandTable {
 	uint16_t size;
 	struct tagITEM* handle_data;
+	struct RuntimeMemory* memory;
+};
+
+struct HandTable64 {
+	uint32_t size;
+	struct tagITEM64* handle_data;
 	struct RuntimeMemory* memory;
 };
 

@@ -15,6 +15,6 @@ Alternatively, create a new Visual Studio C++ project and add cpp source and hpp
 
 ### Project status
 
-The decompiler is in an early stage of development. As of now, it can read the basic Outline structure of standard applications and decompile some basic operations. Only 32bit Team Developer applications are supported yet. Not all language features, variable names, etc. are decompiled correctly.
+The decompiler is in an early stage of development. As of now, it can read the basic Outline structure of standard applications and decompile some basic operations. Not all language features, variable names, etc. are decompiled correctly. Only 32bit Team Developer applications are officially supported yet. Decompiling 64bit applications is currently still buggy.
 
 Currently, TD 5.1 – 7.4 are supported.

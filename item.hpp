@@ -17,13 +17,31 @@
  * <https://www.gnu.org/licenses/>.
  */
 
+#undef INC_ITEM_HPP_
+#ifndef TDx64
 #ifndef ITEM_HPP_
+#define INC_ITEM_HPP_
 #define ITEM_HPP_
+#endif
+#endif
+
+#ifdef TDx64
+#ifndef ITEM64_HPP_
+#define INC_ITEM_HPP_
+#define ITEM64_HPP_
+#endif
+#endif
+
+#ifdef INC_ITEM_HPP_
 #include <stdint.h>
 #include <stack>
 
 class COutline;
+class COutline64;
 
+#include "def64.inc"
+
+#ifndef TDx64
 enum varscope {
 	NONE = 0x00,
 	INTERNAL_FUNCTION_VAR = 0x01,
@@ -47,6 +65,21 @@ struct MatchItemsToScope {
 	varscope sc;
 	uint16_t item_type; // TODO: replace by tbd item-type-enum
 };
+extern struct MatchItemsToScope SCOPE_FUNCTION[];
+extern struct MatchItemsToScope SCOPE_CONSTRUCTOR[];
+
+struct ItemBodyType {
+	const char* name;
+	uint8_t val1;
+	uint8_t val2;
+	uint8_t val3;
+	uint8_t size;
+};
+#endif
+
+extern struct ItemBodyType item_bodies[];
+
+const char* get_event_name(struct ItemBody* item_body);
 
 /**
  * represents an item-type, i.e. a class of specific items, not just a single item!
@@ -56,19 +89,19 @@ private:
 	const char* name;
 
 protected:
-	static void addvar(class COutline* outline, uint32_t memory_item, varscope var_scope, uint32_t item);
-	static void print_array_boundaries(class COutline* outline, uint32_t item_id);
-	static void print_all_itembodies(class COutline*, uint32_t);
-	static uint16_t itembody_elementsize(struct ItemBody* item_body);
+	static void addvar(class COutline* outline, uint64_t memory_item, varscope var_scope, uint64_t item);
+	static void print_array_boundaries(class COutline* outline, uint64_t item_id);
+	static void print_all_itembodies(class COutline*, uint64_t);
 	static struct ItemBody* itembody_next(struct ItemBody* item_body, struct tagITEM* item);
 
 public:
 
-	static void add_itembody(class COutline* outline, uint32_t item_id, struct ItemBody* item_body);
-	static void remove_itembody(class COutline* outline, uint32_t item_id, uint8_t itembody_type);
-	static void itembody_add_string(class COutline* outline, uint32_t item_id, const char* str);
-	static struct ItemBody* get_itembody(class COutline* outline, uint32_t item_id, uint16_t type);
-	static uint32_t get_funcvar_typedef(class COutline* outline, uint32_t item_id);
+	static uint16_t itembody_elementsize(struct ItemBody* item_body);
+	static void add_itembody(class COutline* outline, uint64_t item_id, struct ItemBody* item_body);
+	static void remove_itembody(class COutline* outline, uint64_t item_id, uint8_t itembody_type);
+	static void itembody_add_string(class COutline* outline, uint64_t item_id, const char* str);
+	static struct ItemBody* get_itembody(class COutline* outline, uint64_t item_id, uint16_t type);
+	static uint32_t get_funcvar_typedef(class COutline* outline, uint64_t item_id);
 
 	/**
 	 * name: name of item type
@@ -77,23 +110,23 @@ public:
 	/**
 	 * first pass without printing (e.g. for lpClassMap initialization...)
 	 */
-	virtual void first_pass(class COutline*, uint32_t, uint32_t* memory_item);
+	virtual void first_pass(class COutline*, uint64_t, uint64_t* memory_item);
 	/**
 	 * if item->type is a local memory scope (e.g. a Function), then safe declared variables in mem-array
 	 */
-	virtual void preprocess(class COutline*, uint32_t, uint32_t* memory_item);
+	virtual void preprocess(class COutline*, uint64_t, uint64_t* memory_item);
 	/**
 	 * print item (name of its type (see Constructor) and corresponding name/parameters/decompiled line of code/...)
 	 */
-	virtual void print(class COutline*, uint32_t, uint32_t* memory_item);
+	virtual void print(class COutline*, uint64_t, uint64_t* memory_item);
 	/**
 	 * change item in outline: remove compiled code, add decompiled code
 	 */
-	virtual void decompile(class COutline*, uint32_t, uint32_t* memory_item);
+	virtual void decompile(class COutline*, uint64_t, uint64_t* memory_item);
 	/**
 	 * if item->type is a local memory scope (e.g. a Function), then free corresponding mem-array (see preprocess method)
 	 */
-	virtual void postprocess(class COutline*, uint32_t, uint32_t* memory_item);
+	virtual void postprocess(class COutline*, uint64_t, uint64_t* memory_item);
 	virtual ~CItem();
 };
 
@@ -102,37 +135,37 @@ class CVarScope : public CItem {
 private:
 	const struct MatchItemsToScope* scope;
 	// process single variable node
-	static void callback2(class COutline* outline, uint32_t item, void* param);
+	static void callback2(class COutline* outline, uint64_t item, void* param);
 
 protected:
 	struct Params {
 		const uint16_t* type;
 		const varscope* var_scope;
-		uint32_t* memory_item;
+		uint64_t* memory_item;
 	};
 
 	// process top node of variable scope
-	static void callback1(class COutline* outline, uint32_t item, void* param);
+	static void callback1(class COutline* outline, uint64_t item, void* param);
 
 public:
 	CVarScope(const char* str, const struct MatchItemsToScope* scope);
-	virtual void first_pass(class COutline*, uint32_t, uint32_t* memory_item);
-	virtual void preprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item);
-	virtual void postprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item);
+	virtual void first_pass(class COutline*, uint64_t, uint64_t* memory_item);
+	virtual void preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
+	virtual void postprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
 	virtual ~CVarScope();
 };
 
 class CClass : public CVarScope {
 private:
 	// process top node of variable scope
-	static void callback3(class COutline* outline, uint32_t item, void* param);
+	static void callback3(class COutline* outline, uint64_t item, void* param);
 	// process single variable node
-	static void callback4(class COutline* outline, uint32_t item, void* param);
+	static void callback4(class COutline* outline, uint64_t item, void* param);
 
 public:
 	CClass(const char* str);
-	virtual void first_pass(class COutline*, uint32_t, uint32_t* memory_item);
-	virtual void preprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item);
+	virtual void first_pass(class COutline*, uint64_t, uint64_t* memory_item);
+	virtual void preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
 
 	virtual ~CClass();
 };
@@ -140,39 +173,39 @@ public:
 class CObject : public CClass {
 public:
 	CObject (const char* str);
-	static uint32_t get_class(class COutline* outline, uint32_t item_id);
-	virtual void first_pass(class COutline*, uint32_t, uint32_t* memory_item);
-	virtual void preprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item);
-	virtual void print(class COutline* outline, uint32_t item_id, uint32_t* memory_item);
+	static uint32_t get_class(class COutline* outline, uint64_t item_id);
+	virtual void first_pass(class COutline*, uint64_t, uint64_t* memory_item);
+	virtual void preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
+	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
 	virtual ~CObject();
 };
 
 class CDlg : public CObject {
 private:
-	static void callback0(class COutline* outline, uint32_t item, void* param);
+	static void callback0(class COutline* outline, uint64_t item, void* param);
 public:
 	static std::stack<uint32_t> cur_dlg_item;
 	CDlg(const char* str);
-	virtual void first_pass(class COutline* outline, uint32_t item_id, uint32_t* memory_item);
-	virtual void preprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item);
-	virtual void postprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item);
+	virtual void first_pass(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
+	virtual void preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
+	virtual void postprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
 	virtual ~CDlg();
 };
 
 class CGlobalDecs : public CItem {
 private:
-	static void callback0(class COutline* outline, uint32_t item, void* param);
-	static void callback1(class COutline* outline, uint32_t item, void* param);
+	static void callback0(class COutline* outline, uint64_t item, void* param);
+	static void callback1(class COutline* outline, uint64_t item, void* param);
 
 public:
 	static uint32_t lib_globals;
 	CGlobalDecs(const char* str);
-	virtual void first_pass(class COutline* outline, uint32_t item_id, uint32_t* memory_item);
-	virtual void preprocess(class COutline* outline, uint32_t item_id, uint32_t* memory_item);
+	virtual void first_pass(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
+	virtual void preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
 	virtual ~CGlobalDecs();
 };
 
-#define TAG_ITEMS_AMOUNT 752
+#define TAG_ITEMS_AMOUNT 761
 extern CItem* tag_items[TAG_ITEMS_AMOUNT];
 
 /**
@@ -565,3 +598,4 @@ public:
 };
 
 #endif
+#undef INC_ITEM_HPP_
