@@ -173,7 +173,7 @@ public:
 class CObject : public CClass {
 public:
 	CObject (const char* str);
-	static uint32_t get_class(class COutline* outline, uint64_t item_id);
+	static uint64_t get_class(class COutline* outline, uint64_t item_id);
 	virtual void first_pass(class COutline*, uint64_t, uint64_t* memory_item);
 	virtual void preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
 	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
@@ -184,7 +184,7 @@ class CDlg : public CObject {
 private:
 	static void callback0(class COutline* outline, uint64_t item, void* param);
 public:
-	static std::stack<uint32_t> cur_dlg_item;
+	static std::stack<uint64_t> cur_dlg_item;
 	CDlg(const char* str);
 	virtual void first_pass(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
 	virtual void preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
@@ -198,7 +198,7 @@ private:
 	static void callback1(class COutline* outline, uint64_t item, void* param);
 
 public:
-	static uint32_t lib_globals;
+	static uint64_t lib_globals;
 	CGlobalDecs(const char* str);
 	virtual void first_pass(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
 	virtual void preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item);

@@ -328,6 +328,7 @@ struct tm* SecondsSinceEpochToDateTime(struct tm* pTm, int64_t SecondsSinceEpoch
 template char* alloc(size_t);
 template char16_t* alloc(size_t);
 template uint32_t* alloc(size_t);
+template uint64_t* alloc(size_t);
 template enum datatype* alloc(size_t);
 template struct Outline* alloc(size_t);
 template struct tagITEM* alloc(size_t);

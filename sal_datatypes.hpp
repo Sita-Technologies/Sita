@@ -100,7 +100,9 @@ enum datatype {
 	LPNUMBER,
 	_WCHAR,
 	_LPWCHAR,
-	UDV
+	UDV,
+	_DWORDLONG,
+	_LONGLONG
 };
 
 #endif /* SAL_DATATYPES_HPP_ */

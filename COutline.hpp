@@ -78,17 +78,17 @@ private:
 	char* str_data = NULL;
 	struct ClassMap {
 		uint32_t size;
-		uint32_t* item;
+		uint64_t* item;
 	} class_map = {0, NULL};
 	struct OrdinalMap {
 		uint32_t size;
-		uint32_t* item;
+		uint64_t* item;
 	};
 	struct DynalibMap {
 		uint32_t size;
 		struct OrdinalMap* ordinal_map;
 	} dynamlib_map = {0, NULL};
-	std::map<uint32_t, uint32_t> item_loop_info = std::map<uint32_t, uint32_t>();
+	std::map<uint64_t, uint64_t> item_loop_info = std::map<uint64_t, uint64_t>();
 	std::map<uint32_t, std::map<uint32_t, uint32_t>> dialog_dlgitems = std::map<uint32_t, std::map<uint32_t, uint32_t>>();
 
 	long OsReadFast(unsigned long length, char* result);
@@ -120,22 +120,22 @@ public:
 	tagITEM* get_item(uint64_t item_id);
 	uint64_t item_pointer_dereference(uint64_t item);
 
-	void add_class_item(uint32_t class_id, uint64_t item_id);
-	uint32_t get_class_item(uint32_t class_id);
+	void add_class_item(uint64_t class_id, uint64_t item_id);
+	uint64_t get_class_item(uint64_t class_id);
 
-	void add_dynalib_var(uint16_t libsal, uint16_t ordinal, uint32_t item);
-	uint32_t get_dynalib_var(uint16_t libsal, uint16_t ordinal);
+	void add_dynalib_var(uint16_t libsal, uint16_t ordinal, uint64_t item);
+	uint64_t get_dynalib_var(uint16_t libsal, uint16_t ordinal);
 
-	void set_item_loop_info(uint32_t item, uint32_t data);
-	uint32_t get_item_loop_info(uint32_t item);
+	void set_item_loop_info(uint64_t item, uint64_t data);
+	uint64_t get_item_loop_info(uint64_t item);
 
 	void set_dialog_dlgitem(uint32_t dialog, uint32_t dlgitem, uint32_t item);
 	uint32_t get_dialog_dlgitem(uint32_t dialog, uint32_t dlgitem);
 
 	uint64_t insert_item(uint32_t seginf);
 
-	bool add_variable(uint64_t item_id, enum varscope scope, uint16_t offset, uint32_t reference);
-	uint32_t lookup_variable(uint64_t item_id, enum varscope scope, uint16_t offset, bool print_namespace = false);
+	bool add_variable(uint64_t item_id, enum varscope scope, uint16_t offset, uint64_t reference);
+	uint64_t lookup_variable(uint64_t item_id, enum varscope scope, uint16_t offset, bool print_namespace = false);
 	bool has_any_variable(uint64_t item_id, varscope scope);
 
 	/**

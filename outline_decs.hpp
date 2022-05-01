@@ -431,7 +431,7 @@ struct tagOSEG64{
 
 struct RuntimeMemoryScope {
 	uint16_t current_size;
-	uint32_t* item_id;
+	uint64_t* item_id;
 };
 
 struct RuntimeMemory {
@@ -466,10 +466,28 @@ struct tagEXFUNINFO {
 	uint8_t flags;
 };
 
+struct tagEXFUNINFO64 {
+	uint64_t hItemLibrary; // if the value is 0x00, load function pointer from cdlli72.dll's _INT_LOCALS array. AccessKey contains the array index in this case.
+	uint64_t hItemFun;
+	uint32_t AccessKey;
+	uint64_t lpProc;
+	uint8_t bReturnType;
+	uint8_t flags;
+};
+
 struct tagINTFUNHITEMS {
 	uint32_t hItemDoActions;
 	uint32_t hItemParameters;
 	uint32_t hItemLocals;
+	uint32_t nReturnDataType;
+	uint32_t nStackSizeVars;
+	uint32_t nStackSiteParams;
+};
+
+struct tagINTFUNHITEMS64 {
+	uint64_t hItemDoActions;
+	uint64_t hItemParameters;
+	uint64_t hItemLocals;
 	uint32_t nReturnDataType;
 	uint32_t nStackSizeVars;
 	uint32_t nStackSiteParams;
@@ -481,7 +499,4 @@ struct SalNumber {
 };
 
 #pragma pack(pop)   /* restore original alignment from stack */
-
-
-
 #endif /* OUTLINE_DECS_HPP_ */

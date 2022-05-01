@@ -1,4 +1,4 @@
-Sita Team Decompiler
+opensource Sita Team Decompiler
 ==============
 
 A decompiler for [opentext Gupta Team Developer](https://www.opentext.com/products-and-solutions/products/specialty-technologies/opentext-gupta-development-tools-databases/opentext-gupta-team-developer) applications.

@@ -20,7 +20,7 @@
 #include "system_variables.hpp"
 #include <string.h>
 
-extern const uint16_t max_system_var = 0x1ab;
+extern const uint16_t max_system_var = 0x1f3;
 const char* system_vars[max_system_var];
 
 void init_system_vars() {
@@ -58,5 +58,43 @@ void init_system_vars() {
 	system_vars[0x1a2] = "____sql_temp_STRING";
 	system_vars[0x1a6] = "wpfEventName";
 	system_vars[0x1aa] = "LastException";
+	// TEMPLATE_Null // seems to be a Handle???
+}
+
+void init_system_vars64() {
+	memset(system_vars,0x00,max_system_var*sizeof(const char*));
+	system_vars[0x04] = "hWndForm";
+	system_vars[0x0c] = "hWndMDI";
+	system_vars[0x14] = "hWndNULL";
+	system_vars[0x1c] = "hWndItem";
+	system_vars[0x24] = "hWndFrame";
+	system_vars[0x2c] = "wParam";
+	system_vars[0x45] = "lParam";
+	system_vars[0x5e] = "nArgCount";
+	system_vars[0x77] = "strArgArray"; // ARRAY
+	system_vars[0x7f] = "SqlDatabase";
+	system_vars[0x87] = "SqlINI";
+	system_vars[0x8f] = "SqlUDL";
+	system_vars[0x97] = "SqlUser";
+	system_vars[0x9f] = "SqlPassword";
+	system_vars[0xa7] = "SqlNoRecovery";
+	system_vars[0xc0] = "SqlInMessage";
+	system_vars[0xd9] = "SqlOutMessage";
+	system_vars[0xf2] = "SqlResultSet";
+	system_vars[0x10b] = "SqlIsolationLevel";
+	system_vars[0x113] = "SqlServername";
+	system_vars[0x11b] = "SqlConnectOptions";
+	system_vars[0x123] = "bStaticsAsWindows";
+	system_vars[0x13c] = "bMenuBarAsRibbonBar";
+	system_vars[0x155] = "bMaxDataLengthInBytes";
+	system_vars[0x16e] = "bDeferCreatingTabChildren";
+	system_vars[0x187] = "n_SW_Null";
+	system_vars[0x1a0] = "dt_SW_Null";
+	system_vars[0x1b9] = "STRING_Null";
+	system_vars[0x1c1] = "BINARY_Null";
+	// DATETIME_Null // 0x1c9???
+	system_vars[0x1e2] = "____sql_temp_STRING";
+	system_vars[0x1ea] = "wpfEventName";
+	system_vars[0x1f2] = "LastException";
 	// TEMPLATE_Null // seems to be a Handle???
 }
