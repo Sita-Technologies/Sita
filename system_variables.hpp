@@ -24,5 +24,6 @@
 extern const uint16_t max_system_var;
 extern const char* system_vars[];
 void init_system_vars();
+void init_system_vars64();
 
 #endif /* SYSTEM_VARIABLES_HPP_ */

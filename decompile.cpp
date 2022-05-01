@@ -26,6 +26,7 @@
 #include "system_variables.hpp"
 #include <exception>
 #include <stdio.h>
+#include <string.h>
 #include "commandline_args.hpp"
 
 #define PRECEDENCE_MIN         0x00
@@ -185,7 +186,8 @@ void PrintClassVar(struct DecompileInfo di) {
 	}else{
 		oprintf("class_0x%08x.",class_id);
 	}
-	uint32_t var_address = *((uint32_t*)((uint8_t*)di.compile_block + ParseGetNthOperand(di.compile_block, di.expression, 1)->XBuffer));
+	uint32_t var_address = 0;
+	memcpy(&var_address,(uint8_t*)di.compile_block + ParseGetNthOperand(di.compile_block, di.expression, 1)->XBuffer,4);
 	const char16_t* var_name = di.outline->symbol_lookup(di.outline->lookup_variable(class_item, varscope::STATIC_CLASS_VAR, var_address));
 	if (var_name) {
 		print_utf16(var_name);
@@ -359,7 +361,8 @@ void Const(struct DecompileInfo di) {
 	}else if (di.expected_return_type == WINDOW_HANDLE){
 		oputs("[const functional window handle]");
 	}else if (di.expected_return_type == ITEM_REFERENCE || di.expected_return_type == SCOPE_REFERENCE) {
-		uint32_t item_id = *(uint32_t*)(((uint8_t*)di.compile_block + di.expression->XBuffer));
+		uint64_t item_id = 0;
+		memcpy(&item_id,(uint8_t*)di.compile_block + di.expression->XBuffer,ITEM_ID_WIDTH/4);
 		if (!item_id && di.expected_return_type == ITEM_REFERENCE) {
 			oputs("TEMPLATE_Null");
 			if (di.result_info) {
@@ -374,7 +377,7 @@ void Const(struct DecompileInfo di) {
 				}else if (di.expected_return_type == ITEM_REFERENCE && di.result_info) {
 					*di.result_info = item_id;
 				}
-			}else if (!(item_id & 0xFFFF0000) && di.expected_return_type == SCOPE_REFERENCE) { // method of super-class
+			}else if (!(item_id & (((1LL<<ITEM_ID_WIDTH)-1LL)<<ITEM_ID_WIDTH)) && di.expected_return_type == SCOPE_REFERENCE) { // method of super-class
 				// FIXME: reference is resolved to memory offset defined by 0x33-item-data-fields of parent classes (derived from).
 				// TODO: if a class itself has size 0, but is derived from another class, which class of those is referenced here?
 				if (is_verbose()) {
@@ -389,6 +392,9 @@ void Const(struct DecompileInfo di) {
 		}
 	}else if (di.expected_return_type == _DWORD) {
 		uint32_t value = *(uint32_t*)(((uint8_t*)di.compile_block + di.expression->XBuffer));
+		oprintf("0x%08x",value);
+	}else if (di.expected_return_type == _DWORDLONG) {
+		uint64_t value = *(uint64_t*)(((uint8_t*)di.compile_block + di.expression->XBuffer));
 		oprintf("0x%08x",value);
 	}else{
 		oprintf("[var or const: 0x%08x @ sc0x%02x]",*(uint32_t*)(((uint8_t*)di.compile_block + di.expression->XBuffer)),di.var_scope);
@@ -1412,7 +1418,7 @@ void GetParenthWndByhItem(struct DecompileInfo di) {
 }
 
 void GethWndMDI(struct DecompileInfo di) {
-	uint32_t item = di.memory_item[varscope::CURRENT_FORM]; // this is dirty, but should work
+	uint64_t item = di.memory_item[varscope::CURRENT_FORM]; // this is dirty, but should work
 	const char16_t* name = di.outline->symbol_lookup(item);
 	if (name) {
 		print_utf16(name);
@@ -1432,7 +1438,7 @@ void GethWndForm(struct DecompileInfo di) {
 	if (di.expected_return_type != WINDOW_HANDLE) {
 		// throw exception?
 	}
-	uint32_t item = 0;
+	uint64_t item = 0;
 	if (!CDlg::cur_dlg_item.empty()) {
 		item = CDlg::cur_dlg_item.top();
 	}
@@ -1985,6 +1991,46 @@ void CnvNumberDWORD(struct DecompileInfo di) {
 		throw new std::exception();
 	}
 	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+}
+
+void CnvNumberDWORDLONG(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != _DWORDLONG) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount != 1) {
+		throw new std::exception();
+	}
+	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+}
+
+void CnvNumberLONGLONG(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != _LONGLONG) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount != 1) {
+		throw new std::exception();
+	}
+	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+}
+
+void CnvDWORDLONGNumber(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount != 1) {
+		throw new std::exception();
+	}
+	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _DWORDLONG));
+}
+
+void CnvLONGLONGNumber(struct DecompileInfo di) {
+	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER) {
+		//throw new std::exception();
+	}
+	if (di.expression->XOperandCount != 1) {
+		throw new std::exception();
+	}
+	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), _LONGLONG));
 }
 
 void CnvNumberFLOAT(struct DecompileInfo di) {
@@ -2786,7 +2832,7 @@ void CnvToBoolean(struct DecompileInfo di) {
 
 void ArrayObjectVar(struct DecompileInfo di) {
 	// may occur in Set statement with 4 parameters or in other statements with 3 parameters
-	uint32_t var = 0;
+	uint64_t var = 0;
 	if (di.expression->XOperandCount == 3 || di.expression->XOperandCount == 4) {
 
 		PRECEDENCE(PRECEDENCE_ASSIGN);
@@ -3090,12 +3136,12 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		New, // New2 (for use with IntConstructor)
 		IntConstructor,
 		__not_implemented_yet, // Return
-		__not_implemented_yet, // CnvLONGLONGNumber
-		__not_implemented_yet, // CnvNumberLONGLONG
+		CnvLONGLONGNumber,
+		CnvNumberLONGLONG,
 		__not_implemented_yet, // CnvRecNumberLPLONGLONG
 		__not_implemented_yet, // CnvLPLONGLONGRecNumber
-		__not_implemented_yet, // CnvDWORDLONGNumber
-		__not_implemented_yet, // CnvNumberDWORDLONG
+		CnvDWORDLONGNumber,
+		CnvNumberDWORDLONG,
 		__not_implemented_yet, // CnvRecNumberLPDWORDLONG
 		__not_implemented_yet, // CnvLPDWORDLONGRecNumber
 		__not_implemented_yet, // CnvUDVHanToUDVREF

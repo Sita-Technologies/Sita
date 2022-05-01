@@ -134,7 +134,6 @@ int main(int argc, char** argv) {
 	out.pos = 0;
 	oset(out);
 
-	init_system_vars();
 	COutline outline(td);
 
 	if (outline.get_file_hdr().version < VERSION_TD51) {
@@ -148,9 +147,11 @@ int main(int argc, char** argv) {
 		}
 		// load as 64bit binary
 		COutline64 outline(td);
+		init_system_vars64();
 		return process_outline(outline)?0:1;
 	}
 
 	// process 32bit binary
+	init_system_vars();
 	return process_outline(outline)?0:1;
 }

@@ -695,15 +695,15 @@ uint32_t COutline::save(FILE* handle) {
 	return off;
 }
 
-bool COutline::add_variable(uint64_t item_id, enum varscope scope, uint16_t offset, uint32_t reference) {
+bool COutline::add_variable(uint64_t item_id, enum varscope scope, uint16_t offset, uint64_t reference) {
 	if (!item_id) {
 		return false;
 	}
-	uint16_t item = (item_id>>16);
+	uint32_t item = (item_id>>ITEM_ID_WIDTH);
 	if (item == 0 || item > this->outline->seg_inf_limit) {
 		return false;
 	}
-	uint16_t handle = (item_id&0xFFFF);
+	uint32_t handle = (item_id&((1LL<<ITEM_ID_WIDTH)-1));
 	if (handle == 0 || this->tag_oseg[item] == 0 || this->hand_table == 0 || this->hand_table[item] == 0 || handle > this->tag_oseg[item]->seghd_maxUsedHandle) {
 		return false;
 	}
@@ -715,25 +715,25 @@ bool COutline::add_variable(uint64_t item_id, enum varscope scope, uint16_t offs
 	}
 	struct RuntimeMemory* rms = this->hand_table[item][handle].memory;
 	if (!rms->scope[scope].item_id) {
-		rms->scope[scope].item_id = alloc<uint32_t*>(sizeof(uint32_t)*(offset+1));
+		rms->scope[scope].item_id = alloc<uint64_t*>(sizeof(uint64_t)*(offset+1));
 		if (!rms->scope[scope].item_id) {
 			throw std::bad_alloc();
 		}
 		rms->scope[scope].current_size = offset+1;
 	}else if (rms->scope[scope].current_size <= offset) {
-		uint32_t* newmem = (uint32_t*)realloc(rms->scope[scope].item_id,sizeof(uint32_t)*(offset+1));
+		uint64_t* newmem = (uint64_t*)realloc(rms->scope[scope].item_id,sizeof(uint64_t)*(offset+1));
 		if (!newmem) {
 			throw std::bad_alloc();
 		}
 		rms->scope[scope].item_id = newmem;
-		memset(newmem+rms->scope[scope].current_size,0,sizeof(uint32_t)*(offset+1-rms->scope[scope].current_size));
+		memset(newmem+rms->scope[scope].current_size,0,sizeof(uint64_t)*(offset+1-rms->scope[scope].current_size));
 		rms->scope[scope].current_size = offset+1;
 	}
 	rms->scope[scope].item_id[offset] = reference;
 	return true;
 }
 
-uint32_t COutline::lookup_variable(uint64_t item_id, enum varscope scope, uint16_t offset, bool print_namespace) {
+uint64_t COutline::lookup_variable(uint64_t item_id, enum varscope scope, uint16_t offset, bool print_namespace) {
 	struct RuntimeMemoryScope* rms = get_memory(item_id, scope);
 	if (!rms) {
 		return 0;
@@ -773,17 +773,17 @@ uint32_t COutline::lookup_variable(uint64_t item_id, enum varscope scope, uint16
 	}
 }
 
-void COutline::add_class_item(uint32_t class_id, uint64_t item_id) {
+void COutline::add_class_item(uint64_t class_id, uint64_t item_id) {
 	if (!this->class_map.item) {
-		this->class_map.item = alloc<uint32_t*>(sizeof(uint32_t)*(class_id+1));
+		this->class_map.item = alloc<uint64_t*>(sizeof(uint64_t)*(class_id+1));
 		this->class_map.size = class_id+1;
 	}else if (this->class_map.size <= class_id) {
-		uint32_t* tmp = (uint32_t*)realloc(this->class_map.item, sizeof(uint32_t) * (class_id + 1));
+		uint64_t* tmp = (uint64_t*)realloc(this->class_map.item, sizeof(uint64_t) * (class_id + 1));
 		if (!tmp) {
 			throw new std::bad_alloc();
 		}
 		this->class_map.item = tmp;
-		for (uint32_t i=this->class_map.size;i<class_id+1;i++) {
+		for (uint64_t i=this->class_map.size;i<class_id+1;i++) {
 			this->class_map.item[i] = 0;
 		}
 		this->class_map.size = class_id+1;
@@ -791,14 +791,14 @@ void COutline::add_class_item(uint32_t class_id, uint64_t item_id) {
 	this->class_map.item[class_id] = item_id;
 }
 
-uint32_t COutline::get_class_item(uint32_t class_id) {
+uint64_t COutline::get_class_item(uint64_t class_id) {
 	if (class_id < this->class_map.size) {
 		return this->class_map.item[class_id];
 	}
 	return 0;
 }
 
-void COutline::add_dynalib_var(uint16_t libsal, uint16_t ordinal, uint32_t item) {
+void COutline::add_dynalib_var(uint16_t libsal, uint16_t ordinal, uint64_t item) {
 	if (is_verbose()) {
 		oprintf("HLIBSAL 0x%04x, DYNALIB_ORDINAL 0x%04x: item 0x%08x\n",libsal,ordinal,item);
 	}
@@ -822,13 +822,13 @@ void COutline::add_dynalib_var(uint16_t libsal, uint16_t ordinal, uint32_t item)
 
 	// allocate enough space for ordinal
 	if (!this->dynamlib_map.ordinal_map[libsal].item) {
-		this->dynamlib_map.ordinal_map[libsal].item = alloc<uint32_t*>(sizeof(uint32_t)*(ordinal+1));
+		this->dynamlib_map.ordinal_map[libsal].item = alloc<uint64_t*>(sizeof(uint64_t)*(ordinal+1));
 		if (!this->dynamlib_map.ordinal_map[libsal].item) {
 			throw std::bad_alloc();
 		}
 		this->dynamlib_map.ordinal_map[libsal].size = ordinal+1;
 	}else if (this->dynamlib_map.ordinal_map[libsal].size <= ordinal) {
-		uint32_t* tmp = (uint32_t*)realloc(this->dynamlib_map.ordinal_map[libsal].item, sizeof(uint32_t) * (ordinal + 1));
+		uint64_t* tmp = (uint64_t*)realloc(this->dynamlib_map.ordinal_map[libsal].item, sizeof(uint64_t) * (ordinal + 1));
 		if (!tmp) {
 			throw std::bad_alloc();
 		}
@@ -841,7 +841,7 @@ void COutline::add_dynalib_var(uint16_t libsal, uint16_t ordinal, uint32_t item)
 	this->dynamlib_map.ordinal_map[libsal].item[ordinal] = item;
 }
 
-uint32_t COutline::get_dynalib_var(uint16_t libsal, uint16_t ordinal) {
+uint64_t COutline::get_dynalib_var(uint16_t libsal, uint16_t ordinal) {
 	if (!this->dynamlib_map.ordinal_map) {
 		return 0;
 	}
@@ -867,7 +867,7 @@ uint32_t COutline::find_siblings_of_type_and_run(void (*callback)(class COutline
 		if (!p_item) {
 			return 0;
 		}
-		uint32_t deref = this->item_pointer_dereference(item);
+		uint64_t deref = this->item_pointer_dereference(item);
 		if (deref && deref != item) {
 			callbacks += this->find_siblings_of_type_and_run(callback,param,deref,type,only_one_match);
 			if (only_one_match && callbacks) {
@@ -978,11 +978,11 @@ struct RuntimeMemoryScope* COutline::get_memory(uint64_t item_id, varscope scope
 	if (!item_id) {
 		return NULL;
 	}
-	uint16_t item = (item_id>>16);
+	uint32_t item = (item_id>>ITEM_ID_WIDTH);
 	if (item == 0 || item > this->outline->seg_inf_limit) {
 		return NULL;
 	}
-	uint16_t handle = (item_id&0xFFFF);
+	uint32_t handle = (item_id&((1LL<<ITEM_ID_WIDTH)-1));
 	if (handle == 0 || this->tag_oseg[item] == 0 || this->hand_table == 0 || this->hand_table[item] == 0 || handle > this->tag_oseg[item]->seghd_maxUsedHandle) {
 		return NULL;
 	}
@@ -1004,7 +1004,7 @@ bool COutline::has_any_variable(uint64_t item_id, varscope scope) {
 	return sc->current_size!=0;
 }
 
-void COutline::set_item_loop_info(uint32_t item, uint32_t data) {
+void COutline::set_item_loop_info(uint64_t item, uint64_t data) {
 	try {
 		auto search = this->item_loop_info.find(item);
 		while (search != this->item_loop_info.end()) {
@@ -1018,7 +1018,7 @@ void COutline::set_item_loop_info(uint32_t item, uint32_t data) {
 	this->item_loop_info.insert({item, data});
 }
 
-uint32_t COutline::get_item_loop_info(uint32_t item)  {
+uint64_t COutline::get_item_loop_info(uint64_t item)  {
 	try {
 		auto search = this->item_loop_info.find(item);
 		if (search != this->item_loop_info.end()) {
@@ -1096,7 +1096,7 @@ uint32_t COutline::get_dialog_dlgitem(uint32_t dialog, uint32_t dlgitem) {
 
 void COutline::init_symbol_lookup() {
 	this->symbols = alloc<struct tagPERMSYM***>(sizeof(void*)*(this->outline->seg_inf_limit+1));
-	for (uint16_t item_id = 1;item_id <= this->outline->seg_inf_limit;item_id++) {
+	for (uint32_t item_id = 1;item_id <= this->outline->seg_inf_limit;item_id++) {
 		struct HItem* item = &this->outline->data[item_id-1];
 		if ((item->flags & ITEM_HAS_HANDLE_TABLE) && this->tag_oseg[item_id] && this->tag_oseg[item_id]->seghd_maxUsedHandle) {
 			this->symbols[item_id] = alloc<struct tagPERMSYM**>(sizeof(void*)*(this->tag_oseg[item_id]->seghd_maxUsedHandle+1));
@@ -1135,8 +1135,8 @@ void COutline::init_symbol_lookup() {
 				continue;
 			}
 			struct tagPERMSYM* permsym = (struct tagPERMSYM*)&data[offsets[j]];
-			uint16_t item = permsym->hItem>>16;
-			uint16_t handle = permsym->hItem&0xFFFF;
+			uint32_t item = permsym->hItem>>ITEM_ID_WIDTH;
+			uint32_t handle = permsym->hItem&((1LL<<ITEM_ID_WIDTH)-1LL);
 			if (item && item <= outline->seg_inf_limit
 					&& handle && handle <= this->tag_oseg[item]->seghd_maxUsedHandle
 					&& this->symbols[item]) {
@@ -1148,7 +1148,7 @@ void COutline::init_symbol_lookup() {
 
 const char16_t* COutline::symbol_lookup(uint64_t item_id) {
 	uint32_t item = item_id>>ITEM_ID_WIDTH;
-	uint32_t handle = item_id&((1LL<<ITEM_ID_WIDTH)-1);
+	uint32_t handle = item_id&((1LL<<ITEM_ID_WIDTH)-1LL);
 	if (item && item <= outline->seg_inf_limit && this->tag_oseg[item] && handle && handle <= this->tag_oseg[item]->seghd_maxUsedHandle) {
 		if (this->symbols && this->symbols[item] && this->symbols[item][handle]) {
 			return (const char16_t*)this->symbols[item][handle]->str;

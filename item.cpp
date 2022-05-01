@@ -714,7 +714,11 @@ uint32_t CItem::get_funcvar_typedef(class COutline* outline, uint64_t item_id) {
 	struct ItemBody* item_body = CItem::get_itembody(outline, item_id, 0x14);
 	if (item_body && item_body->size >= 7) {
 		if (item_body->data[0] == 0x05) {
+#ifndef TDx64
 			return *(uint32_t*)&item_body->data[4];
+#else
+			return *(uint64_t*)&item_body->data[4];
+#endif
 		}
 	}
 	return 0;
@@ -727,7 +731,7 @@ public:
 	}
 	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		bool printed = false;
-		uint32_t typedef_at = get_funcvar_typedef(outline, item_id);
+		uint64_t typedef_at = get_funcvar_typedef(outline, item_id);
 		if (typedef_at) {
 			const char16_t* name = outline->symbol_lookup(typedef_at);
 			if (!name) {
@@ -821,7 +825,7 @@ public:
 class CLoop : public CItem {
 
 private:
-	static uint32_t last_loop_id;
+	static uint64_t last_loop_id;
 
 public:
 	CLoop() : CItem("Loop") {
@@ -834,7 +838,7 @@ public:
 
 		if (outline->get_item_loop_info(item_id)) {
 			outline->set_item_loop_info(item_id, ++CLoop::last_loop_id);
-			oprintf(" loop_%u",CLoop::last_loop_id);
+			oprintf(" loop_%llu",CLoop::last_loop_id);
 		}
 	}
 
@@ -842,7 +846,7 @@ public:
 	}
 };
 
-uint32_t CLoop::last_loop_id = 0;
+uint64_t CLoop::last_loop_id = 0;
 
 /**
  * represents item types that contain a line of code
@@ -859,11 +863,12 @@ public:
 
 		struct ItemBody* item_body = get_itembody(outline, item_id, 0x03);
 		if (item_body) {
-			uint32_t item_ref = *((uint32_t*)&item_body->size);
+			uint64_t item_ref = 0;
+			memcpy(&item_ref,&item_body->size,item_bodies[0x03].size);
 			tagITEM* item_p = outline->get_item(item_ref);
 			if (item_p) {
 				if (item_p->type == Item::Type::LOOP) {
-					uint32_t loop_id = outline->get_item_loop_info(item_ref);
+					uint64_t loop_id = outline->get_item_loop_info(item_ref);
 					if (loop_id) {
 						// TODO: determine whether the loop is the nearest break-out-item so that no label may be needed - only set additional item info if this is not the case
 						oprintf(" loop_%u",loop_id);
@@ -877,7 +882,8 @@ public:
 		CItem::first_pass(outline, item_id, memory_item);
 		struct ItemBody* item_body = get_itembody(outline, item_id, 0x03);
 		if (item_body) {
-			uint32_t item_ref = *((uint32_t*)&item_body->size);
+			uint64_t item_ref = 0;
+			memcpy(&item_ref,&item_body->size,item_bodies[0x03].size);
 			tagITEM* item_p = outline->get_item(item_ref);
 			if (item_p) {
 				if (item_p->type == Item::Type::LOOP) {
@@ -909,8 +915,9 @@ public:
 
 		struct ItemBody* item_body = get_itembody(outline, item_id, 0x03);
 		if (item_body) {
-			uint32_t num = *((uint32_t*)&item_body->size);
-			oprintf(" %u",num);
+			uint64_t num = 0;
+			memcpy(&num,&item_body->size,item_bodies[0x03].size);
+			oprintf(" %llu",num);
 		}
 	}
 
@@ -1193,7 +1200,8 @@ private:
 	static void callback0(class COutline* outline, uint64_t item, void* param) {
 		struct ItemBody* item_body = get_itembody(outline, item, 0x0d);
 		if (item_body) {
-			uint32_t class_id = *((uint32_t*)&item_body->size);
+			uint64_t class_id = 0;
+			memcpy(&class_id,&item_body->size,item_bodies[0x0d].size);
 			outline->add_class_item(class_id, item);
 		}
 		uint16_t type[] = {
@@ -1207,7 +1215,7 @@ private:
 		outline->find_children_of_type_and_run(callback2, param, item, NULL, false);
 	}
 	static void callback2(class COutline* outline, uint64_t item, void* param) {
-		addvar(outline, *(uint32_t*)param, varscope::STATIC_CLASS_VAR, item);
+		addvar(outline, *(uint64_t*)param, varscope::STATIC_CLASS_VAR, item);
 	}
 
 public:
@@ -1230,10 +1238,10 @@ void CGlobalDecs::callback0(class COutline* outline, uint64_t item, void* param)
 }
 
 void CGlobalDecs::callback1(class COutline* outline, uint64_t item, void* param) {
-	addvar(outline, *(uint32_t*)param, varscope::LIB_GLOBALS, item);
+	addvar(outline, *(uint64_t*)param, varscope::LIB_GLOBALS, item);
 }
 
-uint32_t CGlobalDecs::lib_globals = 0;
+uint64_t CGlobalDecs::lib_globals = 0;
 
 CGlobalDecs::CGlobalDecs(const char* str) : CItem(str) {
 }
@@ -1313,7 +1321,7 @@ void CClass::callback4(class COutline* outline, uint64_t item, void* param) {
 	// resolve item address, add them to scope (call CClass), find out offset...
 
 	// get variable name and memory offset
-	uint32_t classdef_pointer = 0;
+	uint64_t classdef_pointer = 0;
 	uint32_t var_offset = 0;
 	struct ItemBody* item_body = get_itembody(outline, item, 0x33);
 	if (item_body) {
@@ -1321,13 +1329,13 @@ void CClass::callback4(class COutline* outline, uint64_t item, void* param) {
 	}
 	item_body = get_itembody(outline, item, 0x13);
 	if (item_body) {
-		classdef_pointer = *((uint32_t*)((uint8_t*)item_body+1));
+		memcpy(&classdef_pointer, (uint8_t*)item_body+1, item_bodies[0x13].size);
 	}
 
 	if (!classdef_pointer) {
 		return;
 	}
-	outline->add_variable(*(uint32_t*)param, varscope::CURRENT_OBJECT, var_offset, classdef_pointer);
+	outline->add_variable(*(uint64_t*)param, varscope::CURRENT_OBJECT, var_offset, classdef_pointer);
 }
 
 
@@ -1354,7 +1362,7 @@ CClass::~CClass() {
 CObject::CObject (const char* str) : CClass(str) {
 }
 
-uint32_t CObject::get_class(class COutline* outline, uint64_t item_id) {
+uint64_t CObject::get_class(class COutline* outline, uint64_t item_id) {
 	struct ItemBody* ib = get_itembody(outline, item_id, 0x14);
 	if (!ib) {
 		return 0;
@@ -1364,7 +1372,7 @@ uint32_t CObject::get_class(class COutline* outline, uint64_t item_id) {
 	}
 	uint16_t type = *((uint16_t*)ib->data); // should match item->type value!!
 	uint32_t offset = 0;
-	switch (type) {
+	switch (type) { // FIXME adapt to 64bit apps!
 	case 0x01: // Form Window
 		offset = 0x04; // may depend on version of Team Developer
 		break;
@@ -1372,13 +1380,17 @@ uint32_t CObject::get_class(class COutline* outline, uint64_t item_id) {
 		offset = 0x10; // may depend on version of Team Developer
 		break;
 	default:
-		offset = 0x10; // FIXME: THIS IS NOT CORRECT!!!!!
-		//return 0; // TODO: not supported yet
+		offset = 0x10; // FIXME: THIS IS NOT CORRECT!!!!! other types are missing
 	}
-	if (ib->size < offset + sizeof(uint32_t)) {
+	if (ib->size < offset + sizeof(uint32_t)) { // FIXME adapt to 64bit apps!
 		return 0;
 	}
-	uint32_t class_type = *((uint32_t*)&ib->data[offset]);
+	uint64_t class_type = 0;
+#ifndef TDx64
+	class_type = *((uint32_t*)&ib->data[offset]);
+#else
+	class_type = *((uint64_t*)&ib->data[offset]);
+#endif
 	tagITEM* class_item = outline->get_item(class_type);
 	if (!class_item) {
 		return 0;
@@ -1456,7 +1468,7 @@ struct MatchItemsToScope SCOPE_CONSTRUCTOR[] = {
 };
 #endif
 
-std::stack<uint32_t> CDlg::cur_dlg_item = std::stack<uint32_t>();
+std::stack<uint64_t> CDlg::cur_dlg_item = std::stack<uint64_t>();
 
 CDlg::CDlg(const char* str) : CObject(str) {
 }
@@ -1483,7 +1495,7 @@ void CDlg::first_pass(class COutline* outline, uint64_t item_id, uint64_t* memor
 	struct CVarScope::Params p = {type2, &sc, &item_id};
 	outline->find_children_of_type_and_run(callback0, &p, item_id, type1);
 
-	uint32_t object_class = CObject::get_class(outline, item_id);
+	uint64_t object_class = CObject::get_class(outline, item_id);
 	if (object_class && outline->has_any_variable(object_class, varscope::CURRENT_OBJECT)) {
 		outline->add_variable(item_id, varscope::CURRENT_FORM, 0, object_class);
 	}
@@ -1499,7 +1511,7 @@ void CDlg::preprocess(class COutline* outline, uint64_t item_id, uint64_t* memor
 
 void CDlg::postprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	if (cur_dlg_item.top() != item_id || cur_dlg_item.empty()) {
-		//throw std::exception(); // FIXME: why does this occur for 64bit app??
+		throw std::exception();
 	}
 	cur_dlg_item.pop();
 	CObject::postprocess(outline, item_id, memory_item);

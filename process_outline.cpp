@@ -1,3 +1,23 @@
+/**
+ * This file is part of Sita Team Decompiler.
+ *
+ * Sita Team Decompiler is free software: you can redistribute it
+ * and/or modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation, either version 3 of
+ * the License, or (at your option) any later version.
+ *
+ *
+ * Sita Team Decompiler is distributed in the hope that it will be
+ * useful, but WITHOUT ANY WARRANTY; without even the implied warranty
+ * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Sita Team Decompiler. If not, see
+ * <https://www.gnu.org/licenses/>.
+ */
+
+#define _CRT_SECURE_NO_WARNINGS
 #include "process_outline.hpp"
 
 #include "helper.hpp"
@@ -32,7 +52,7 @@ void iterate_items(COutline& outline, uint64_t item, uint32_t indention, uint64_
 
 			if (is_verbose() && !first_pass) {
 				print_indent(indention);
-				oprintf("%04x.%04x: ",item>>16,item&0xFFFF);
+				oprintf("%04x.%04x: ",item>>ITEM_ID_WIDTH,item&((1LL<<ITEM_ID_WIDTH)-1));
 				oprintf("[0x%04x]",p_item->type);
 				oprintf("(flgs:0x%08x)",p_item->flags);
 				oputs("<NULL> ");
@@ -54,7 +74,7 @@ void iterate_items(COutline& outline, uint64_t item, uint32_t indention, uint64_
 				if (!get_app_output_filename() || is_verbose()) {
 					print_indent(indention);
 					if (is_verbose()) {
-						oprintf("%04x.%04x: ",item>>16,item&0xFFFF);
+						oprintf("%04x.%04x: ",item>>ITEM_ID_WIDTH,item&((1LL<<ITEM_ID_WIDTH)-1));
 						oprintf("[0x%04x]",p_item->type);
 						oprintf("(flgs:0x%08x)",p_item->flags);
 					}
@@ -77,7 +97,7 @@ void iterate_items(COutline& outline, uint64_t item, uint32_t indention, uint64_
 		}else{
 			if (is_verbose() && !first_pass && !get_app_output_filename()) {
 				print_indent(indention);
-				oprintf("%04x.%04x: ",item>>16,item&0xFFFF);
+				oprintf("%04x.%04x: ",item>>ITEM_ID_WIDTH,item&((1LL<<ITEM_ID_WIDTH)-1));
 				oprintf("[0x%04x]",p_item->type);
 				oprintf("(flgs:0x%08x)",p_item->flags);
 				oputs("<NULL_noref> ");
