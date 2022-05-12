@@ -54,3 +54,4 @@
 #undef  DispatchFunction
 #undef  tagEXFUNINFO
 #undef  tagINTFUNHITEMS
+#undef  tagRESNAME

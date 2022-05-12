@@ -302,18 +302,19 @@ struct ResInfo {
 };
 
 // a chain of these structs follow ResInfo; terminated by size==0, id==0 struct
-struct ResItemStruct{ // name of struct in cdlli??.dll??
+struct ResItemStruct { // name of struct in cdlli??.dll??
 	uint16_t size; // including this struct-Header
 	uint16_t id;
 	uint8_t data[0];
 };
 
-struct tagRESSEG{
+struct tagRESSEG {
 	uint16_t hNext; // res_seg-chain... terminated by 0x00
 	uint16_t wSegType;
 	uint16_t hSegInf; // reference to res-item for res_seg-id, e.g. 0xab???
 	uint16_t wUseCount;
 	uint16_t flags; // bShrunk
+	uint16_t wUnused;
 };
 
 struct tagRESNAME {
@@ -324,6 +325,19 @@ struct tagRESNAME {
 	uint16_t hResSeg; // pointer to tagRESSEG
 	uint16_t hResHdr;
 	uint16_t wHash; // how is it computed?
+	uint32_t flags; // bLoaded, bMarked
+	char16_t szFilename[1];
+};
+
+struct tagRESNAME64 {
+	uint16_t hNext; // list of entries for same res_hash_name... terminated by 0x00
+	uint16_t wResType;
+	uint16_t wUseCount;
+	uint16_t padding;
+	uint32_t lResLong;
+	uint16_t hResSeg; // pointer to tagRESSEG
+	uint16_t hResHdr;
+	uint32_t wHash; // how is it computed?
 	uint32_t flags; // bLoaded, bMarked
 	char16_t szFilename[1];
 };

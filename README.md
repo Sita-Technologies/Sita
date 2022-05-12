@@ -11,7 +11,7 @@ Run `Sita` in the command prompt to view the usage hint.
 
 Run `make` to build the application.
 
-Alternatively, create a new Visual Studio C++ project and add cpp source and hpp header files to that project.
+Alternatively, create a new Visual Studio C++ project and add cpp source and hpp/inc header files to that project.
 
 ### Project status
 

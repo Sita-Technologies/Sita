@@ -54,4 +54,5 @@
 #define DispatchFunction  DispatchFunction64
 #define tagEXFUNINFO      tagEXFUNINFO64
 #define tagINTFUNHITEMS   tagINTFUNHITEMS64
+#define tagRESNAME        tagRESNAME64
 #endif

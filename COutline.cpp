@@ -703,7 +703,7 @@ bool COutline::add_variable(uint64_t item_id, enum varscope scope, uint16_t offs
 	if (item == 0 || item > this->outline->seg_inf_limit) {
 		return false;
 	}
-	uint32_t handle = (item_id&((1LL<<ITEM_ID_WIDTH)-1));
+	uint32_t handle = (item_id&((1LL<<ITEM_ID_WIDTH)-1LL));
 	if (handle == 0 || this->tag_oseg[item] == 0 || this->hand_table == 0 || this->hand_table[item] == 0 || handle > this->tag_oseg[item]->seghd_maxUsedHandle) {
 		return false;
 	}
@@ -982,7 +982,7 @@ struct RuntimeMemoryScope* COutline::get_memory(uint64_t item_id, varscope scope
 	if (item == 0 || item > this->outline->seg_inf_limit) {
 		return NULL;
 	}
-	uint32_t handle = (item_id&((1LL<<ITEM_ID_WIDTH)-1));
+	uint32_t handle = (item_id&((1LL<<ITEM_ID_WIDTH)-1LL));
 	if (handle == 0 || this->tag_oseg[item] == 0 || this->hand_table == 0 || this->hand_table[item] == 0 || handle > this->tag_oseg[item]->seghd_maxUsedHandle) {
 		return NULL;
 	}

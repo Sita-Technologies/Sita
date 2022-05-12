@@ -52,7 +52,7 @@ void iterate_items(COutline& outline, uint64_t item, uint32_t indention, uint64_
 
 			if (is_verbose() && !first_pass) {
 				print_indent(indention);
-				oprintf("%04x.%04x: ",item>>ITEM_ID_WIDTH,item&((1LL<<ITEM_ID_WIDTH)-1));
+				oprintf("%04x.%04x: ",item>>ITEM_ID_WIDTH,item&((1LL<<ITEM_ID_WIDTH)-1LL));
 				oprintf("[0x%04x]",p_item->type);
 				oprintf("(flgs:0x%08x)",p_item->flags);
 				oputs("<NULL> ");
@@ -74,7 +74,7 @@ void iterate_items(COutline& outline, uint64_t item, uint32_t indention, uint64_
 				if (!get_app_output_filename() || is_verbose()) {
 					print_indent(indention);
 					if (is_verbose()) {
-						oprintf("%04x.%04x: ",item>>ITEM_ID_WIDTH,item&((1LL<<ITEM_ID_WIDTH)-1));
+						oprintf("%04x.%04x: ",item>>ITEM_ID_WIDTH,item&((1LL<<ITEM_ID_WIDTH)-1LL));
 						oprintf("[0x%04x]",p_item->type);
 						oprintf("(flgs:0x%08x)",p_item->flags);
 					}
@@ -97,7 +97,7 @@ void iterate_items(COutline& outline, uint64_t item, uint32_t indention, uint64_
 		}else{
 			if (is_verbose() && !first_pass && !get_app_output_filename()) {
 				print_indent(indention);
-				oprintf("%04x.%04x: ",item>>ITEM_ID_WIDTH,item&((1LL<<ITEM_ID_WIDTH)-1));
+				oprintf("%04x.%04x: ",item>>ITEM_ID_WIDTH,item&((1LL<<ITEM_ID_WIDTH)-1LL));
 				oprintf("[0x%04x]",p_item->type);
 				oprintf("(flgs:0x%08x)",p_item->flags);
 				oputs("<NULL_noref> ");
