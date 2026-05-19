@@ -49,13 +49,13 @@ enum varscope {
 	INTERNAL_FUNCTION_PARAM_PRE = 0x03,
 	CURRENT_FORM = 0x04,
 	GLOBAL_SEGMENT = 0x05, // system variables
-	SQL_INTO_BIND_SEGMENT = 0x06, // TODO: when is it used?
+	SQL_INTO_BIND_SEGMENT = 0x06,
 	CURRENT_OBJECT = 0x07,
 	DS_OF_OPERATOR = 0x08,
-	CURRENT_FORM_CLASS = 0x09, // TODO: when is it used?
-	SCOPE_0a = 0x0a, // TODO: when is it used? how does the lookup work?
-	SCOPE_0b = 0x0b, // TODO: when is it used? how does the lookup work?
-	SCOPE_0d = 0x0d, // TODO: when is it used? how does the lookup work?
+	CURRENT_FORM_CLASS = 0x09,
+	SCOPE_0a = 0x0a,
+	SCOPE_0b = 0x0b,
+	SCOPE_0d = 0x0d, // late-bound dynalib call; XBuffer encodes (HLIBSAL, DYNALIB_ORDINAL)
 	LIB_GLOBALS = 0x0e,
 	STATIC_CLASS_VAR = 0x0f, // pointer to class is stored in next parameter
 	DYN_LIB = 0x10 // see OamDynLibResolveVarAddress
@@ -63,7 +63,7 @@ enum varscope {
 
 struct MatchItemsToScope {
 	varscope sc;
-	uint16_t item_type; // TODO: replace by tbd item-type-enum
+	uint16_t item_type;
 };
 extern struct MatchItemsToScope SCOPE_FUNCTION[];
 extern struct MatchItemsToScope SCOPE_CONSTRUCTOR[];
@@ -102,11 +102,23 @@ public:
 	static void itembody_add_string(class COutline* outline, uint64_t item_id, const char* str);
 	static struct ItemBody* get_itembody(class COutline* outline, uint64_t item_id, uint16_t type);
 	static uint32_t get_funcvar_typedef(class COutline* outline, uint64_t item_id);
+	// Emit `.data <NAME> ... .enddata` blocks for any binary-shaped bodies
+	// (VIEWINFO/CCDATA/.../CLASSPROPS/etc.) attached to the item. Text-output
+	// modes only — gated internally.
+	static void print_data_blocks(class COutline* outline, uint64_t item_id);
+	// Format the array-suffix for a variable item into an ASCII buffer
+	// (e.g. "[*]", "[10]", "[1:5]"). Returns chars written (0 if the item
+	// has no MDARRAYBOUNDS body — i.e. not an array). Mirrors
+	// print_array_boundaries text-mode output. Used by the binary-output
+	// (`-a`) path to append the suffix to body 0x01 (TEXT) so the runtime
+	// reads back the array-ness from the name.
+	static size_t format_array_suffix(class COutline* outline, uint64_t item_id, char* out, size_t out_sz);
 
 	/**
 	 * name: name of item type
 	 */
 	CItem(const char* name);
+	const char* get_name() const { return name; }
 	/**
 	 * first pass without printing (e.g. for lpClassMap initialization...)
 	 */
@@ -119,6 +131,15 @@ public:
 	 * print item (name of its type (see Constructor) and corresponding name/parameters/decompiled line of code/...)
 	 */
 	virtual void print(class COutline*, uint64_t, uint64_t* memory_item);
+	/**
+	 * Emit zero or more synthetic child lines after the item's main line.
+	 * Each emitted line MUST be `print_indent(indention+1) + content + "\n"`
+	 * so leading-space layout matches a real child in the .apt format.
+	 * Default no-op; CFunctionalVar overrides to emit `Class: <name>` derived
+	 * from the WINATTR handle reference — that binding lives in an auxiliary
+	 * heap block that has no own tagITEM, so iterate_items can't walk to it.
+	 */
+	virtual void print_extra_lines(class COutline*, uint64_t item_id, uint32_t indention);
 	/**
 	 * change item in outline: remove compiled code, add decompiled code
 	 */
@@ -156,9 +177,18 @@ public:
 };
 
 class CClass : public CVarScope {
-private:
-	// process top node of variable scope
+protected:
+	// process top node of variable scope — called from CClass::first_pass
+	// (and CDlg::first_pass, which inherits via CObject) to walk `Derived
+	// From` children and register parent-class pointers into CURRENT_OBJECT.
 	static void callback3(class COutline* outline, uint64_t item, void* param);
+	// The control-instance type these class definitions bind for
+	// (e.g. "Data Field Class:" → 0x04 (Data Field), "Custom Control Class:"
+	// → 0x16). 0 means the class definition isn't bound to a control type
+	// (Functional Class:, Background Worker Class:, etc.). Computed lazily
+	// at first registration in first_pass via tag_items name lookup.
+	uint16_t target_control_type;
+private:
 	// process single variable node
 	static void callback4(class COutline* outline, uint64_t item, void* param);
 
@@ -177,6 +207,11 @@ public:
 	virtual void first_pass(class COutline*, uint64_t, uint64_t* memory_item);
 	virtual void preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
 	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
+	// Emit synthetic `Class: <name>` line for control instances using the
+	// control-type → class-definition map populated by CClass::first_pass.
+	// Falls through to CItem::print_extra_lines (synth Resource Id, WINATTR
+	// strings, geometry, .data blocks).
+	virtual void print_extra_lines(class COutline*, uint64_t item_id, uint32_t indention);
 	virtual ~CObject();
 };
 
@@ -190,6 +225,18 @@ public:
 	virtual void preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
 	virtual void postprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
 	virtual ~CDlg();
+};
+
+// Object that contains named dlgitem children (Column, etc.) but is NOT
+// itself a form/dialog. Pushes onto CDlg::cur_dlg_item so `owner.child`
+// dereferences resolve against it; does not touch CURRENT_FORM scope.
+class CDlgParent : public CObject {
+public:
+	CDlgParent(const char* str);
+	virtual void first_pass(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
+	virtual void preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
+	virtual void postprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item);
+	virtual ~CDlgParent();
 };
 
 class CGlobalDecs : public CItem {
@@ -209,7 +256,7 @@ public:
 extern CItem* tag_items[TAG_ITEMS_AMOUNT];
 
 /**
- * old class; TODO: should be removed in the future
+ * old class; should be removed in the future
  */
 class Item {
 

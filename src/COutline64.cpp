@@ -17,7 +17,6 @@
  * <https://www.gnu.org/licenses/>.
  */
 
-#define _CRT_SECURE_NO_WARNINGS
 #include "item.hpp"
 
 #define TDx64

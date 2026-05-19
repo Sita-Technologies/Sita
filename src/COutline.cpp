@@ -17,7 +17,6 @@
  * <https://www.gnu.org/licenses/>.
  */
 
-#define _CRT_SECURE_NO_WARNINGS
 
 #include "COutline.hpp"
 #include "helper.hpp"
@@ -34,6 +33,25 @@
 #else
 #error "neither Unix nor Windows environment defined"
 #endif
+
+void COutline::suppress_item(uint64_t item_id) {
+	if (!item_id) {
+		return;
+	}
+	this->suppressed_items.insert(item_id);
+}
+
+void COutline::suppress_segment(uint32_t seginf) {
+	if (!seginf || seginf > this->outline->seg_inf_limit) {
+		return;
+	}
+	// Zero the HItem entry so save() emits a dummy slot. The segment-level
+	// tag_oseg pointer is left intact (no reads will happen — save() guards
+	// on item.size).
+	this->outline->data[seginf-1].size = 0;
+	this->outline->data[seginf-1].offset = 0;
+	this->outline->data[seginf-1].flags = 0;
+}
 
 uint64_t COutline::insert_item(uint32_t seginf) {
 	if (!seginf) {
@@ -130,13 +148,12 @@ COutline::COutline(FILE* handle) : handle(handle) {
 			fread_or_throw(&form_item, sizeof(form_item), handle);
 			/*
 			if (form_item) {
-				// TODO: store list of active windows somewhere...?
 			}
 			*/
 		}while(form_item);
 	}
 
-	// read CGAXLibInfo [see cdlli72.dll:0x1040a39a]
+	// read CGAXLibInfo
 	// FileHdr: uint32_t ax_lib_info_offset;
 	// Length: see FileHdr: uint32_t ax_lib_info_len;
 	if (this->file_hdr.ax_lib_info_offset && this->file_hdr.ax_lib_info_len) {
@@ -145,7 +162,7 @@ COutline::COutline(FILE* handle) : handle(handle) {
 		fread_or_throw(this->ax_lib_info, this->file_hdr.ax_lib_info_len, handle);
 	}
 
-	// read CClassRelationships [see cdlli72.dll:0x1040a3d3]
+	// read CClassRelationships
 	// CCLassRelationships: uint32_t, (size 4/ptr:)CArray*<CClsRelation,CClsRelation> clsRelationList, uint32_t bool_Compacted
 	// CClsRelation: uint32_t, HItem*, (size 4/ptr:)CArray*<CClsRelation,CClsRelation> devivedList
 	if (this->file_hdr.class_relationship_offset && this->file_hdr.class_relationship_length) {
@@ -169,7 +186,6 @@ COutline::COutline(FILE* handle) : handle(handle) {
 		printf("\n");
 	}
 
-	// TODO: CGComServerInfo may follow?? [cdlli72.dll:0x1040a4ad]
 
 	// process all items from the HItem-Array following the Outline struct
 	// each of them may refer to a HandTable
@@ -182,8 +198,8 @@ COutline::COutline(FILE* handle) : handle(handle) {
 	uint32_t items_dumped = 0;
 	for (
 			struct HItem* item = this->outline->data;
-			(char*)item + sizeof(struct HItem) - (char*)this->outline <= this->outline->outline_alloc
-					&& item - this->outline->data <= this->outline->seg_inf_limit;
+			(size_t)((char*)item + sizeof(struct HItem) - (char*)this->outline) <= this->outline->outline_alloc
+					&& (size_t)(item - this->outline->data) <= this->outline->seg_inf_limit;
 			item++
 	) {
 		this->tag_oseg[item_id] = 0;
@@ -227,17 +243,16 @@ COutline::COutline(FILE* handle) : handle(handle) {
 			break;
 		}
 		if (compression_method == 1) {
-			// TODO case 1 in switch statement [cdlli72.dll, offset 0x10351a17]
-			fprintf(stderr,"unsupported flag 0x%08x at item %u. skipping item (%u bytes)\n",item->flags,item_id,item->size);
+			fprintf(stderr,"unsupported flag 0x%08llx at item %llu. skipping item (%u bytes)\n",(unsigned long long)item->flags,(unsigned long long)item_id,item->size);
 			item_id++;
 			continue;
 		}
 
 		if (item->size < sizeof(struct tagOSEG)) {
-			fprintf(stderr,"warning:item 0x%04x is smaller than sizeof(tagOSEG)\n",item_id);
+			fprintf(stderr,"warning:item 0x%04llx is smaller than sizeof(tagOSEG)\n",(unsigned long long)item_id);
 		}else{
 			if (this->tag_oseg[item_id]->ohSegInf != item_id) {
-				fprintf(stderr,"warning: ohSegInf 0x%04x doesn't match item-id 0x%04x\n",this->tag_oseg[item_id]->ohSegInf,item_id);
+				fprintf(stderr,"warning: ohSegInf 0x%04llx doesn't match item-id 0x%04llx\n",(unsigned long long)this->tag_oseg[item_id]->ohSegInf,(unsigned long long)item_id);
 			}
 		}
 
@@ -249,7 +264,7 @@ COutline::COutline(FILE* handle) : handle(handle) {
 				if (s > 0 && get_item_dump_dir()[s-1] != '/') {
 					slash[0] = '/';
 				}
-				sprintf(fn,"%s%sitem_%04x.bin",get_item_dump_dir(),slash,item_id);
+				sprintf(fn,"%s%sitem_%04llx.bin",get_item_dump_dir(),slash,(unsigned long long)item_id);
 				FILE* fh = fopen(fn,"wb");
 				if (fh) {
 					items_dumped++;
@@ -271,7 +286,7 @@ COutline::COutline(FILE* handle) : handle(handle) {
 			if (s > 0 && get_item_dump_dir()[s-1] != '/') {
 				slash[0] = '/';
 			}
-			sprintf(fn,"%s%sresource_%04x.bin",get_item_dump_dir(),slash,item_id);
+			sprintf(fn,"%s%sresource_%04llx.bin",get_item_dump_dir(),slash,(unsigned long long)item_id);
 			FILE* res = fopen(fn,"wb");
 			if (res) {
 				items_dumped++;
@@ -291,6 +306,8 @@ COutline::COutline(FILE* handle) : handle(handle) {
 	}
 
 	this->init_symbol_lookup();
+	this->init_class_msgs_map();
+	this->init_dynalink_function_map();
 
 	// read HStringTable /// seems to be padded to an offset modulo 4 == 0
 	this->string_table = 0;
@@ -308,7 +325,7 @@ COutline::COutline(FILE* handle) : handle(handle) {
 		}
 	}
 
-	if (is_verbose() || get_resource_dump_dir()) {
+	if (is_verbose() || get_effective_resource_dir()) {
 		uint32_t resources_dumped = 0;
 		if (this->outline->hResInfo) {
 			if (is_verbose()) {
@@ -320,7 +337,6 @@ COutline::COutline(FILE* handle) : handle(handle) {
 			}else if (item->size < sizeof(struct tagOSEG) + sizeof(struct ResInfo)){
 				fprintf(stderr,"error: size of hResInfo item too small\n");
 			}else{
-				// TODO: check if item->size is large enough to hold all references...
 				uint8_t* data = (uint8_t*)this->tag_oseg[this->outline->hResInfo];
 				struct ResInfo* info = (struct ResInfo*)&data[sizeof(struct tagOSEG)];
 				for (int i=0; i<30; i++) {
@@ -352,7 +368,7 @@ COutline::COutline(FILE* handle) : handle(handle) {
 						}
 
 						// extract data
-						if (get_resource_dump_dir() && resseg && resseg <= this->outline->seg_inf_limit) {
+						if (get_effective_resource_dir() && resseg && resseg <= this->outline->seg_inf_limit) {
 							HItem* item = &this->outline->data[resseg-1];
 							if (!(item->flags & ITEM_IS_RESOURCE)) {
 								fprintf(stderr,"error: resource flag not set for hResInfo item\n");
@@ -401,48 +417,70 @@ COutline::COutline(FILE* handle) : handle(handle) {
 									// write to file
 									if (resdata) {
 										// open question: how is the checksum computed? can/should we verify it?
-										char* resfilename = NULL;
+										// Decode the embedded UTF-16 filename (attacker-controlled — comes
+										// straight from the .exe), then run it through sanitize_relpath()
+										// to reject `..`, absolute paths, and drive letters before joining
+										// to the dump dir. Falls back to a safe `resource_SSSSHHHH.bin`
+										// stub when the .exe carried no filename or the embedded path is
+										// rejected as unsafe.
+										std::string raw_name;
 										size_t filename_len = strlen_utf16(rn->szFilename);
-										size_t path_len = strlen(get_resource_dump_dir());
-										char slash[2] = {0x00, 0x00};
-										if (path_len > 0 && get_resource_dump_dir()[path_len-1] != '/') {
-											slash[0] = '/';
-											path_len++;
-										}
 										if (filename_len) {
 											size_t max_out_len = 2*filename_len+1;
-											resfilename = alloc<char*>(path_len+max_out_len);
-											sprintf(resfilename,"%s%s",get_resource_dump_dir(),slash);
-											char* out_buffer = resfilename+path_len;
+											char* tmp = alloc<char*>(max_out_len);
+											char* out_buffer = tmp;
 											char16_t* fn = rn->szFilename;
-#ifdef __unix__ 
+											size_t in_bytes = filename_len * 2;
+#ifdef __unix__
 											iconv_t str_convert = iconv_open("UTF-8", "UTF-16LE");
-											iconv(str_convert, (char**)&fn, &filename_len, &out_buffer, &max_out_len);
+											iconv(str_convert, (char**)&fn, &in_bytes, &out_buffer, &max_out_len);
 											iconv_close(str_convert);
 #else
-											out_buffer += WideCharToMultiByte(CP_ACP, 0, (LPCWCH)fn, (int)filename_len/2, out_buffer, (int)max_out_len, NULL, NULL);
+											out_buffer += WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)fn, (int)filename_len, out_buffer, (int)max_out_len, NULL, NULL);
 #endif
 											*out_buffer = 0;
-										}else{
-											resfilename = alloc<char*>(path_len+22);
-											sprintf(resfilename,"%s%sresource_%04x%04x.bin", get_resource_dump_dir(), slash, resseg, rn->hResHdr);
+											raw_name.assign(tmp);
+											free(tmp);
 										}
+
+										std::string safe_rel;
+										bool name_ok = !raw_name.empty() && sanitize_relpath(raw_name, safe_rel);
+										if (!raw_name.empty() && !name_ok) {
+											fprintf(stderr,"warning: rejecting unsafe resource filename \"%s\" for %04x.%04x (path traversal protection); falling back to resource_%04x%04x.bin\n",
+												raw_name.c_str(), resseg, rn->hResHdr, resseg, rn->hResHdr);
+										}
+
+										const char* dir = get_effective_resource_dir();
+										size_t dir_len = strlen(dir);
+										char slash[2] = {0x00, 0x00};
+										if (dir_len > 0 && dir[dir_len-1] != '/') {
+											slash[0] = '/';
+										}
+										std::string fullpath;
+										if (name_ok) {
+											fullpath = std::string(dir) + slash + safe_rel;
+										} else {
+											char stub[32];
+											snprintf(stub, sizeof(stub), "resource_%04x%04x.bin", resseg, rn->hResHdr);
+											fullpath = std::string(dir) + slash + stub;
+										}
+										mkdir_parents(fullpath);
+
 										if (is_verbose()) {
-											FILE* resfile = fopen(resfilename,"rb");
+											FILE* resfile = fopen(fullpath.c_str(),"rb");
 											if (resfile) {
-												fprintf(stderr,"dumping resource %04x%04x to file %s: already exists\n",resseg, rn->hResHdr,resfilename);
+												fprintf(stderr,"dumping resource %04x%04x to file %s: already exists\n",resseg, rn->hResHdr,fullpath.c_str());
 												fclose(resfile);
 											}
 										}
-										FILE* resfile = fopen(resfilename,"wb");
+										FILE* resfile = fopen(fullpath.c_str(),"wb");
 										if (resfile) {
 											resources_dumped++;
 											fwrite(resdata, reshdr->uncompressed_len, 1, resfile);
 											fclose(resfile);
 										}else{
-											fprintf(stderr,"cannot dump resource %04x%04x to file %s\n",resseg, rn->hResHdr,resfilename);
+											fprintf(stderr,"cannot dump resource %04x%04x to file %s\n",resseg, rn->hResHdr,fullpath.c_str());
 										}
-										free(resfilename);
 									}
 
 									if (resdata && reshdr->compression_type == 2) {
@@ -456,8 +494,8 @@ COutline::COutline(FILE* handle) : handle(handle) {
 				}
 			}
 		}
-		if (get_resource_dump_dir()) {
-			printf("%u resource%s dumped into directory %s\n",resources_dumped,resources_dumped==1?"":"s",get_resource_dump_dir());
+		if (get_effective_resource_dir()) {
+			printf("%u resource%s dumped into directory %s\n",resources_dumped,resources_dumped==1?"":"s",get_effective_resource_dir());
 		}
 		if (is_verbose()) {
 			oputs("\n");
@@ -476,7 +514,9 @@ uint32_t COutline::save(FILE* handle) {
 			& (~FLAG_VISIBLE_H_ITEMS) & (~FLAG_COMPILED)); // .app file
 	hdr.class_relationship_length = 0; // .app file
 	hdr.co_class_list_offset = 0; // .app file
+	hdr.co_class_list_len = 0; // .app file (was preserved from .exe — cbi -b crashes if nonzero alongside File Include)
 	hdr.co_class_interface_map_len = 0; // .app file
+	hdr.auto_create_count = 0; // .app file (cbi-c-built .app always has 0 here)
 
 	// adapt offsets in FileHdr
 	uint32_t off = sizeof(FileHdr) + hdr.outline_alloc + sizeof(SymbolHash);
@@ -507,11 +547,20 @@ uint32_t COutline::save(FILE* handle) {
 	outl->h_string_tables = 0; // remove HStringTable
 
 
-	outl->flags &= ((~OFLAG_APP_IS_COMPILED) &
+	// Clear .exe-specific runtime / signing / OS-target flags. Sita removes
+	// CHILDLINECOUNT (body 0x30) bodies during decompile, so the matching
+	// outline-level flag CHILD_LINE_COUNTS_ADDED is also cleared. ALL_MARKED
+	// is a runtime-only "all items selected for compile" marker — clearing
+	// it matches a clean .app that hasn't been compiled-from yet.
+	outl->flags &= ((~OFLAG_APP_SYMBOLS_CURRENT) &
+			(~OFLAG_APP_IS_COMPILED) &
 			(~OFLAG_APP_CHANGED) & (~OFLAG_APP_SAVE_COMPILED) &
 			(~OFLAG_FILE_IS_EXE) & (~OFLAG_FILE_IS_DLL) &
 			(~OFLAG_UNTITLED) & (~OFLAG_RUN_ONLY) &
-			(~OFLAG_CHILD_LINE_COUNTS_ADDED));
+			(~OFLAG_ALL_MARKED) &
+			(~OFLAG_GLMS_SIGN_MASK) &
+			(~OFLAG_CHILD_LINE_COUNTS_ADDED) &
+			~(uint32_t)0xf0000); // strip OS-target bits
 
 
 	// write header data
@@ -544,7 +593,7 @@ uint32_t COutline::save(FILE* handle) {
 		struct tagOSEG* oseg = NULL;
 
 		if (!this->tag_oseg[i] && item.size) {
-			fprintf(stderr,"unexpected NULL pointer while saving item 0x%04x of size 0x%04x with flags 0x%08x...\n",i,item.size,item.flags);
+			fprintf(stderr,"unexpected NULL pointer while saving item 0x%04x of size 0x%04x with flags 0x%08llx...\n",i,item.size,(unsigned long long)item.flags);
 			item.size = 0;
 		}else if (item.size) {
 			oseg = this->tag_oseg[i];
@@ -557,6 +606,10 @@ uint32_t COutline::save(FILE* handle) {
 			uint32_t size = 0;
 			if (this->hand_table[i]) {
 				for (uint16_t j=1; j<=this->tag_oseg[i]->seghd_maxUsedHandle; j++) {
+					uint64_t item_id = (((uint64_t)i)<<ITEM_ID_WIDTH) | (uint64_t)j;
+					if (this->suppressed_items.count(item_id)) {
+						continue;
+					}
 					if (this->hand_table[i][j].handle_data) {
 						if ((this->hand_table[i][j].size & HANDTABLE_ITEMSIZE_MASK) < (sizeof(struct tagHEAPBLK)+4-1)/4) {
 							fprintf(stderr,"error: handtable[0x%04x][0x%04x].size too small\n",i,j);
@@ -587,6 +640,10 @@ uint32_t COutline::save(FILE* handle) {
 			uint64_t offset = header_size;
 			if (this->hand_table[i]) {
 				for (uint32_t j=1; j<=this->tag_oseg[i]->seghd_maxUsedHandle; j++) {
+					uint64_t item_id = (((uint64_t)i)<<ITEM_ID_WIDTH) | (uint64_t)j;
+					if (this->suppressed_items.count(item_id)) {
+						continue;
+					}
 					if (this->hand_table[i][j].handle_data) {
 						if (offset + (sizeof(struct tagHEAPBLK)+4-1)/4 > size + header_size) {
 							fprintf(stderr,"size counting failure\n");
@@ -607,7 +664,7 @@ uint32_t COutline::save(FILE* handle) {
 							}
 							copy_size -= sizeof(struct tagHEAPBLK);
 						}
-						if (copy_size+sizeof(struct tagHEAPBLK) > 4*(this->hand_table[i][j].size & HANDTABLE_ITEMSIZE_MASK)) {
+						if (copy_size+sizeof(struct tagHEAPBLK) > (size_t)4*(this->hand_table[i][j].size & HANDTABLE_ITEMSIZE_MASK)) {
 							fprintf(stderr,"size counting failure\n");
 							continue;
 						}
@@ -627,7 +684,6 @@ uint32_t COutline::save(FILE* handle) {
 									lines += count_linebreaks((const char16_t*)str->data,str->size);
 								}
 								if (lines > 0xff) {
-									// FIXME: handle items with huge amount of lines (overflow)
 									lines = 0xff;
 								}
 								((struct tagITEM*)&ptr->data)->flags |= (lines<<16);
@@ -696,14 +752,36 @@ uint32_t COutline::save(FILE* handle) {
 }
 
 bool COutline::add_variable(uint64_t item_id, enum varscope scope, uint16_t offset, uint64_t reference) {
+	if (getenv("SITA_DBG_VAR")) {
+		fprintf(stderr, "ADD item=0x%08lx scope=0x%02x off=0x%04x ref=0x%08lx\n",
+			(unsigned long)item_id, scope, offset, (unsigned long)reference);
+	}
+	if (getenv("SITA_DBG_COLLIDE")) {
+		// Detect silent overwrites — a prior non-zero entry at the same slot
+		// means two different declarations claim the same offset. In normal
+		// TD output this should not happen within a single scope for an item.
+		uint32_t item = (uint32_t)(item_id>>ITEM_ID_WIDTH);
+		uint32_t handle = (uint32_t)(item_id&((1LL<<ITEM_ID_WIDTH)-1LL));
+		if (item && item <= this->outline->seg_inf_limit
+				&& this->hand_table && this->hand_table[item]
+				&& this->hand_table[item][handle].memory
+				&& this->hand_table[item][handle].memory->scope[scope].item_id
+				&& offset < this->hand_table[item][handle].memory->scope[scope].current_size) {
+			uint64_t prev = this->hand_table[item][handle].memory->scope[scope].item_id[offset];
+			if (prev && prev != reference) {
+				fprintf(stderr, "COLLIDE item=0x%08lx scope=0x%02x off=0x%04x old=0x%08lx new=0x%08lx\n",
+					(unsigned long)item_id, scope, offset, (unsigned long)prev, (unsigned long)reference);
+			}
+		}
+	}
 	if (!item_id) {
 		return false;
 	}
-	uint32_t item = (item_id>>ITEM_ID_WIDTH);
+	uint32_t item = (uint32_t)(item_id>>ITEM_ID_WIDTH);
 	if (item == 0 || item > this->outline->seg_inf_limit) {
 		return false;
 	}
-	uint32_t handle = (item_id&((1LL<<ITEM_ID_WIDTH)-1LL));
+	uint32_t handle = (uint32_t)(item_id&((1LL<<ITEM_ID_WIDTH)-1LL));
 	if (handle == 0 || this->tag_oseg[item] == 0 || this->hand_table == 0 || this->hand_table[item] == 0 || handle > this->tag_oseg[item]->seghd_maxUsedHandle) {
 		return false;
 	}
@@ -736,10 +814,18 @@ bool COutline::add_variable(uint64_t item_id, enum varscope scope, uint16_t offs
 uint64_t COutline::lookup_variable(uint64_t item_id, enum varscope scope, uint16_t offset, bool print_namespace) {
 	struct RuntimeMemoryScope* rms = get_memory(item_id, scope);
 	if (!rms) {
+		if (getenv("SITA_DBG_LOOKUP")) {
+			fprintf(stderr, "LKP-MISS-noscope item=0x%08lx scope=0x%02x off=0x%04x\n",
+				(unsigned long)item_id, scope, offset);
+		}
 		return 0;
 	}
 	uint32_t off = offset;
 	if (!rms->current_size) {
+		if (getenv("SITA_DBG_LOOKUP")) {
+			fprintf(stderr, "LKP-MISS-empty item=0x%08lx scope=0x%02x off=0x%04x\n",
+				(unsigned long)item_id, scope, offset);
+		}
 		return 0;
 	}
 	if (rms->current_size <= off) {
@@ -750,35 +836,94 @@ uint64_t COutline::lookup_variable(uint64_t item_id, enum varscope scope, uint16
 			break;
 		}
 		if (!off) {
+			if (getenv("SITA_DBG_LOOKUP")) {
+				fprintf(stderr, "LKP-MISS-zero item=0x%08lx scope=0x%02x off=0x%04x current_size=0x%x\n",
+					(unsigned long)item_id, scope, offset, rms->current_size);
+			}
 			return 0;
 		}
 		off--;
 	}while(1);
 
+	// Cascade into the matched item's nested scope. Try four resolvers in
+	// order (relative vs absolute offset × same-scope vs CURRENT_OBJECT):
+	//
+	//   1. child[scope][offset-off]                 — relative, same scope
+	//   2. child[scope][offset]                     — absolute, same scope
+	//   3. child[CURRENT_OBJECT][offset-off]        — relative, object scope
+	//   4. child[CURRENT_OBJECT][offset]            — absolute, object scope
+	//
+	// (3) and (4) only apply when the outer scope is CURRENT_FORM — they
+	// handle the class-template pattern: a form-window instance has its
+	// parent-class registered at offset 0; lookup of a CURRENT_FORM-scoped
+	// access cascades into the class, which has its Instance Variables
+	// registered at CURRENT_OBJECT scope.
+	uint64_t r = 0;
+	bool resolved_same_scope = false;
 	if (get_memory(rms->item_id[off], scope)) {
-		if (print_namespace) {
-			const char16_t* _namespace = this->symbol_lookup(rms->item_id[off]);
-			if (_namespace) {
-				print_utf16(_namespace);
-				oputs(".");
+		r = lookup_variable(rms->item_id[off], scope, offset-off);
+		if (!r && off != 0) {
+			r = lookup_variable(rms->item_id[off], scope, offset);
+		}
+		resolved_same_scope = (r != 0);
+	}
+	bool resolved_zc_fallback = false;
+	if (!r && scope == varscope::CURRENT_FORM
+			&& get_memory(rms->item_id[off], varscope::CURRENT_OBJECT)) {
+		r = lookup_variable(rms->item_id[off], varscope::CURRENT_OBJECT, offset-off);
+		if (!r && off != 0) {
+			r = lookup_variable(rms->item_id[off], varscope::CURRENT_OBJECT, offset);
+		}
+		// If the resolution went through the CURRENT_OBJECT fallback at
+		// offset 0 *and* the cascade target is the outer's declared class,
+		// this is the class-template case (an instance accessing an Instance
+		// Variable of its class) — the namespace prefix should be the outer
+		// instance's name.
+		if (r && off == 0) {
+			uint64_t outer_class = CObject::get_class(this, item_id);
+			if (outer_class && outer_class == rms->item_id[off]) {
+				resolved_zc_fallback = true;
 			}
 		}
-		return lookup_variable(rms->item_id[off], scope, offset-off);
-	}else if (scope == varscope::CURRENT_FORM && get_memory(rms->item_id[off], varscope::CURRENT_OBJECT)) {
-		return lookup_variable(rms->item_id[off], varscope::CURRENT_OBJECT, offset-off);
-	}else if (offset == off) {
-		return rms->item_id[off];
-	}else{
-		return 0;
 	}
+	if (r && print_namespace && (resolved_same_scope || resolved_zc_fallback)) {
+		// When the cascade step is through the **parent-class pointer**
+		// (the item registered at offset 0 of the outer by CDlg::
+		// first_pass because `get_class(outer) == that item`), print the
+		// outer item's own name — SAL source writes the instance name
+		// (e.g. `frm.X`), not the class name (`cls.X`), even though X is
+		// an Instance Variable declared in the class. For any other
+		// cascade (Child Tables at non-zero offsets, controls at offset 0
+		// that aren't the class pointer, etc.), keep the cascade-target
+		// name — that's a genuine container qualifier.
+		uint64_t ns_id = rms->item_id[off];
+		if (off == 0) {
+			uint64_t outer_class = CObject::get_class(this, item_id);
+			if (outer_class && outer_class == rms->item_id[off]) {
+				ns_id = item_id;
+			}
+		}
+		const char16_t* _namespace = this->symbol_lookup(ns_id);
+		if (_namespace) {
+			print_utf16(_namespace);
+			oputs(".");
+		}
+	}
+	if (r) {
+		return r;
+	}
+	if (offset == off) {
+		return rms->item_id[off];
+	}
+	return 0;
 }
 
 void COutline::add_class_item(uint64_t class_id, uint64_t item_id) {
 	if (!this->class_map.item) {
-		this->class_map.item = alloc<uint64_t*>(sizeof(uint64_t)*(class_id+1));
-		this->class_map.size = class_id+1;
+		this->class_map.item = alloc<uint64_t*>(sizeof(uint64_t)*(size_t)(class_id+1));
+		this->class_map.size = (uint32_t)(class_id+1);
 	}else if (this->class_map.size <= class_id) {
-		uint64_t* tmp = (uint64_t*)realloc(this->class_map.item, sizeof(uint64_t) * (class_id + 1));
+		uint64_t* tmp = (uint64_t*)realloc(this->class_map.item, sizeof(uint64_t) * (size_t)(class_id + 1));
 		if (!tmp) {
 			throw new std::bad_alloc();
 		}
@@ -786,7 +931,7 @@ void COutline::add_class_item(uint64_t class_id, uint64_t item_id) {
 		for (uint64_t i=this->class_map.size;i<class_id+1;i++) {
 			this->class_map.item[i] = 0;
 		}
-		this->class_map.size = class_id+1;
+		this->class_map.size = (uint32_t)(class_id+1);
 	}
 	this->class_map.item[class_id] = item_id;
 }
@@ -794,6 +939,24 @@ void COutline::add_class_item(uint64_t class_id, uint64_t item_id) {
 uint64_t COutline::get_class_item(uint64_t class_id) {
 	if (class_id < this->class_map.size) {
 		return this->class_map.item[class_id];
+	}
+	return 0;
+}
+
+void COutline::register_class_for_control_type(uint16_t control_type, uint64_t class_def_item) {
+	// Don't overwrite — first registration wins. When multiple classes of
+	// the same control type exist, the form's Default Classes section
+	// overrides per-instance, but the "first declared" heuristic is enough
+	// for the common single-class case.
+	if (this->default_class_for_control_type.find(control_type) == this->default_class_for_control_type.end()) {
+		this->default_class_for_control_type[control_type] = class_def_item;
+	}
+}
+
+uint64_t COutline::get_default_class_for_control_type(uint16_t control_type) {
+	auto it = this->default_class_for_control_type.find(control_type);
+	if (it != this->default_class_for_control_type.end()) {
+		return it->second;
 	}
 	return 0;
 }
@@ -963,31 +1126,75 @@ tagITEM* COutline::get_item(uint64_t item_id) {
 	if (!item_id) {
 		return NULL;
 	}
-	uint32_t item = (item_id>>ITEM_ID_WIDTH);
+	uint32_t item = (uint32_t)(item_id>>ITEM_ID_WIDTH);
 	if (item == 0 || item > this->outline->seg_inf_limit) {
 		return NULL;
 	}
-	uint32_t handle = (item_id&((1LL<<ITEM_ID_WIDTH)-1LL));
+	uint32_t handle = (uint32_t)(item_id&((1LL<<ITEM_ID_WIDTH)-1LL));
 	if (handle == 0 || this->tag_oseg[item] == 0 || this->hand_table == 0 || this->hand_table[item] == 0 || handle > this->tag_oseg[item]->seghd_maxUsedHandle) {
 		return NULL;
 	}
 	return this->hand_table[item][handle].handle_data;
 }
 
+uint8_t* COutline::get_handle_data(uint32_t seginf, uint32_t handle_id) {
+	if (seginf == 0 || seginf > this->outline->seg_inf_limit) {
+		return NULL;
+	}
+	if (handle_id == 0 || this->tag_oseg[seginf] == 0 || this->hand_table == 0
+			|| this->hand_table[seginf] == 0
+			|| handle_id > this->tag_oseg[seginf]->seghd_maxUsedHandle) {
+		return NULL;
+	}
+	return (uint8_t*)this->hand_table[seginf][handle_id].handle_data;
+}
+
+uint32_t COutline::get_handle_data_size(uint32_t seginf, uint32_t handle_id) {
+	if (seginf == 0 || seginf > this->outline->seg_inf_limit) return 0;
+	if (handle_id == 0 || this->tag_oseg[seginf] == 0 || this->hand_table == 0
+			|| this->hand_table[seginf] == 0
+			|| handle_id > this->tag_oseg[seginf]->seghd_maxUsedHandle) {
+		return 0;
+	}
+	uint32_t sz = this->hand_table[seginf][handle_id].size;
+	uint32_t dwords = sz & HANDTABLE_ITEMSIZE_MASK;
+	if (dwords == 0) return 0;
+	// Block size = dwords * 4. The HandTable's stored data already excludes
+	// the tagHEAPBLK header (4 bytes) — `create_handtable` allocates
+	// (dwords-1)*4 bytes for the payload.
+	return (dwords - 1) * 4;
+}
+
+bool COutline::is_handle_tagitem(uint32_t seginf, uint32_t handle_id) {
+	if (seginf == 0 || seginf > this->outline->seg_inf_limit) return false;
+	if (handle_id == 0 || this->tag_oseg[seginf] == 0 || this->hand_table == 0
+			|| this->hand_table[seginf] == 0
+			|| handle_id > this->tag_oseg[seginf]->seghd_maxUsedHandle) {
+		return false;
+	}
+	return (this->hand_table[seginf][handle_id].size & (HANDTABLE_ITEMSIZE_MASK + 1)) != 0;
+}
+
+uint32_t COutline::get_max_handle(uint32_t seginf) {
+	if (seginf == 0 || seginf > this->outline->seg_inf_limit) return 0;
+	if (this->tag_oseg[seginf] == 0) return 0;
+	return this->tag_oseg[seginf]->seghd_maxUsedHandle;
+}
+
 struct RuntimeMemoryScope* COutline::get_memory(uint64_t item_id, varscope scope) {
 	if (!item_id) {
 		return NULL;
 	}
-	uint32_t item = (item_id>>ITEM_ID_WIDTH);
+	uint32_t item = (uint32_t)(item_id>>ITEM_ID_WIDTH);
 	if (item == 0 || item > this->outline->seg_inf_limit) {
 		return NULL;
 	}
-	uint32_t handle = (item_id&((1LL<<ITEM_ID_WIDTH)-1LL));
+	uint32_t handle = (uint32_t)(item_id&((1LL<<ITEM_ID_WIDTH)-1LL));
 	if (handle == 0 || this->tag_oseg[item] == 0 || this->hand_table == 0 || this->hand_table[item] == 0 || handle > this->tag_oseg[item]->seghd_maxUsedHandle) {
 		return NULL;
 	}
 	struct RuntimeMemory* rms = this->hand_table[item][handle].memory;
-	if (rms && rms->scope && rms->scope[scope].current_size && rms->scope[scope].item_id) {
+	if (rms && rms->scope[scope].current_size && rms->scope[scope].item_id) {
 		return &rms->scope[scope];
 	}
 	return NULL;
@@ -1030,8 +1237,8 @@ uint64_t COutline::get_item_loop_info(uint64_t item)  {
 	}
 }
 
-void COutline::set_dialog_dlgitem(uint32_t dialog, uint32_t dlgitem, uint32_t item) {
-	std::map<uint32_t, uint32_t> map;
+void COutline::set_dialog_dlgitem(uint64_t dialog, uint32_t dlgitem, uint64_t item) {
+	std::map<uint32_t, uint64_t> map;
 	bool found = false;
 	try {
 		auto search = this->dialog_dlgitems.find(dialog);
@@ -1046,7 +1253,7 @@ void COutline::set_dialog_dlgitem(uint32_t dialog, uint32_t dlgitem, uint32_t it
 			throw std::exception();
 		}
 	}catch (...) {
-		map = std::map<uint32_t, uint32_t>();
+		map = std::map<uint32_t, uint64_t>();
 	}
 
 	try {
@@ -1071,13 +1278,32 @@ void COutline::set_dialog_dlgitem(uint32_t dialog, uint32_t dlgitem, uint32_t it
 				search = this->dialog_dlgitems.erase(search);
 			}
 		}catch (...) {
-			map = std::map<uint32_t, uint32_t>();
+			map = std::map<uint32_t, uint64_t>();
 		}
 	}
 	this->dialog_dlgitems.insert({dialog, map});
 }
 
-uint32_t COutline::get_dialog_dlgitem(uint32_t dialog, uint32_t dlgitem) {
+uint64_t COutline::find_unique_dlgitem(uint32_t dlgitem) {
+	uint64_t found = 0;
+	try {
+		for (const auto& kv : this->dialog_dlgitems) {
+			auto inner = kv.second.find(dlgitem);
+			if (inner == kv.second.end()) {
+				continue;
+			}
+			if (found && found != inner->second) {
+				return 0; // ambiguous — multiple dialogs own this dlgitem
+			}
+			found = inner->second;
+		}
+	} catch (...) {
+		return 0;
+	}
+	return found;
+}
+
+uint64_t COutline::get_dialog_dlgitem(uint64_t dialog, uint32_t dlgitem) {
 	try {
 		auto search = this->dialog_dlgitems.find(dialog);
 		if (search == this->dialog_dlgitems.end()) {
@@ -1137,6 +1363,11 @@ void COutline::init_symbol_lookup() {
 			struct tagPERMSYM* permsym = (struct tagPERMSYM*)&data[offsets[j]];
 			uint32_t item = permsym->hItem>>ITEM_ID_WIDTH;
 			uint32_t handle = permsym->hItem&((1LL<<ITEM_ID_WIDTH)-1LL);
+			if (getenv("SITA_DBG_SYM")) {
+				char u8[256] = {0};
+				for (int k = 0; k < 100 && permsym->str[k*2]; k++) u8[k] = permsym->str[k*2];
+				fprintf(stderr, "SYM hItem=0x%08llx str=%s\n", (unsigned long long)permsym->hItem, u8);
+			}
 			if (item && item <= outline->seg_inf_limit
 					&& handle && handle <= this->tag_oseg[item]->seghd_maxUsedHandle
 					&& this->symbols[item]) {
@@ -1147,8 +1378,8 @@ void COutline::init_symbol_lookup() {
 }
 
 const char16_t* COutline::symbol_lookup(uint64_t item_id) {
-	uint32_t item = item_id>>ITEM_ID_WIDTH;
-	uint32_t handle = item_id&((1LL<<ITEM_ID_WIDTH)-1LL);
+	uint32_t item = (uint32_t)(item_id>>ITEM_ID_WIDTH);
+	uint32_t handle = (uint32_t)(item_id&((1LL<<ITEM_ID_WIDTH)-1LL));
 	if (item && item <= outline->seg_inf_limit && this->tag_oseg[item] && handle && handle <= this->tag_oseg[item]->seghd_maxUsedHandle) {
 		if (this->symbols && this->symbols[item] && this->symbols[item][handle]) {
 			return (const char16_t*)this->symbols[item][handle]->str;
@@ -1157,9 +1388,230 @@ const char16_t* COutline::symbol_lookup(uint64_t item_id) {
 	return NULL;
 }
 
+void COutline::init_class_msgs_map() {
+	// Walk every item in every segment. Each class-bearing item carries
+	// a CLASS_MSGS body 0x12 listing (msgcode, fn-flags, target_handler_id,
+	// fn_pointer) entries — 16 bytes per entry, preceded by a uint32 count.
+	// target_handler_id is the per-class `On <event>` handler item the
+	// runtime dispatches to (and the same value the compiler embeds as
+	// operand 1 of `@RunBaseClassMsg(...)` opcode 0x119/0x1bc). Reverse the
+	// table so a handler id resolves to its owning class.
+	for (uint32_t seg = 1; seg <= this->outline->seg_inf_limit; seg++) {
+		if (!this->tag_oseg[seg] || !this->hand_table || !this->hand_table[seg]) continue;
+		uint32_t max_h = this->tag_oseg[seg]->seghd_maxUsedHandle;
+		for (uint32_t handle = 1; handle <= max_h; handle++) {
+			uint64_t class_id = (((uint64_t)seg) << ITEM_ID_WIDTH) | handle;
+			tagITEM* p_item = this->hand_table[seg][handle].handle_data;
+			if (!p_item) continue;
+			struct ItemBody* body = CItem::get_itembody(this, class_id, 0x12); // CLASS_MSGS
+			if (!body || body->size < 4) continue;
+			uint32_t count = *(uint32_t*)&body->data[0];
+			if (count == 0) continue;
+			// Entry layout (32-bit .exe):
+			//   [0..3]  msgcode  (uint32, e.g. 0x1001 SAM_Create)
+			//   [4..7]  fn-flags (uint32)
+			//   [8..11] target_handler_id (low16=handle, high16=seg)
+			//   [12..]  function pointer — TD 7.x is 4 bytes (entry total 16),
+			//           TD 6.x is 1 byte (entry total 13).
+			// Auto-detect by checking which size matches body->size exactly.
+			// 64-bit layout TBD — leave for the 64-bit refactor; binary-only
+			// 64-bit support is acknowledged buggy.
+			uint32_t entry_size = 0;
+			if (4 + count * 16 == (uint32_t)body->size) entry_size = 16;
+			else if (4 + count * 13 == (uint32_t)body->size) entry_size = 13;
+			else continue; // unknown CLASS_MSGS encoding — skip
+			for (uint32_t i = 0; i < count; i++) {
+				uint8_t* p = &body->data[4 + i * entry_size];
+				uint32_t target = *(uint32_t*)&p[8];
+				if (target == 0) continue;
+				// First-write-wins: derived classes inherit their parent's
+				// CLASS_MSGS entries, so the same target can appear in many
+				// classes' tables. The "owning" class — the one that physically
+				// declares the handler in its Message Actions block — usually
+				// appears first because the segment containing the handler is
+				// laid out adjacent to its owner. Don't overwrite.
+				if (this->handler_to_class_map.find(target) == this->handler_to_class_map.end()) {
+					this->handler_to_class_map[target] = class_id;
+				}
+			}
+		}
+	}
+}
+
+void COutline::init_dynalink_function_map() {
+	// Walk all items and register every "Dynalink-something" item in
+	// `dynamlib_map` keyed by (HLIBSAL, DYNALIB_ORDINAL). The map is already
+	// populated for Dynalink Variables in `CItem::addvar`; this pass picks
+	// up Functions and Form Windows / Dialog Boxes / Table Windows / MDI
+	// Windows / Quest Tables, which the variable-pass skips. The selection
+	// criterion is body-based, not type-based: any item carrying both
+	// DYNALIB_ORDINAL (body 0x2a) and an INCLUDEHITEM (body 0x10) pointing
+	// to a Dynalib (which holds HLIBSAL in body 0x2b) counts. Variable types
+	// are already in the map; first-write-wins guards (`get_dynalib_var`
+	// check) keep them intact.
+	//
+	// Late-bound IntFunction calls (TD `..`) AND template-keyed window APIs
+	// (`SalCreateWindow` / `SalModalDialog` / `SalSendMsg` first arg) both
+	// store a `LIBHITEM { uint16 hLib; uint16 wItemId; }` where hLib is the
+	// HLIBSAL of the target Dynalib and wItemId is the DYNALIB_ORDINAL of
+	// the called function or the referenced form template.
+	for (uint32_t seg = 1; seg <= this->outline->seg_inf_limit; seg++) {
+		if (!this->tag_oseg[seg] || !this->hand_table || !this->hand_table[seg]) continue;
+		uint32_t max_h = this->tag_oseg[seg]->seghd_maxUsedHandle;
+		for (uint32_t handle = 1; handle <= max_h; handle++) {
+			uint64_t item_id = (((uint64_t)seg) << ITEM_ID_WIDTH) | handle;
+			tagITEM* p_item = this->hand_table[seg][handle].handle_data;
+			if (!p_item) continue;
+
+			struct ItemBody* ord_body = CItem::get_itembody(this, item_id, 0x2a);
+			if (!ord_body) continue;
+			uint16_t ordinal = *((uint16_t*)((uint8_t*)ord_body + 1));
+			if (!ordinal) continue;
+
+			struct ItemBody* inc_body = CItem::get_itembody(this, item_id, 0x10);
+			if (!inc_body) continue;
+			uint32_t include_hitem = *((uint32_t*)((uint8_t*)inc_body + 1));
+			if (!include_hitem) continue;
+
+			struct ItemBody* hl_body = CItem::get_itembody(this, include_hitem, 0x2b);
+			if (!hl_body) continue;
+			uint16_t libsal = *((uint16_t*)((uint8_t*)hl_body + 1));
+			if (!libsal) continue;
+
+			// Don't overwrite existing entries (variables registered first).
+			if (this->get_dynalib_var(libsal, ordinal)) continue;
+			this->add_dynalib_var(libsal, ordinal, item_id);
+		}
+	}
+}
+
+uint64_t COutline::class_for_handler(uint64_t handler_item_id) {
+	auto it = this->handler_to_class_map.find(handler_item_id);
+	if (it == this->handler_to_class_map.end()) return 0;
+	return it->second;
+}
+
+const char16_t* COutline::permsym_name_by_flat_index(uint32_t flat_index) {
+	uint32_t j = flat_index / 0x97;
+	uint32_t bucket = flat_index % 0x97;
+	if (!this->symbol_hash[bucket]) {
+		return NULL;
+	}
+	if (this->symbol_hash[bucket] > this->outline->seg_inf_limit) {
+		return NULL;
+	}
+	struct HItem* hitem = &this->outline->data[this->symbol_hash[bucket]-1];
+	if (!(hitem->flags & ITEM_IS_SYMBOL_ARRAY)) {
+		return NULL;
+	}
+	if (!this->tag_oseg[this->symbol_hash[bucket]]) {
+		return NULL;
+	}
+	uint8_t* data = this->tag_oseg[this->symbol_hash[bucket]]->data;
+	uint16_t count = *((uint16_t*)&data[0]);
+	if (j >= count) {
+		return NULL;
+	}
+	uint32_t* offsets = (uint32_t*)&data[2];
+	if (offsets[j] + sizeof(struct tagPERMSYM) > hitem->size) {
+		return NULL;
+	}
+	struct tagPERMSYM* permsym = (struct tagPERMSYM*)&data[offsets[j]];
+	return (const char16_t*)permsym->str;
+}
+
+uint64_t COutline::permsym_item_by_flat_index(uint32_t flat_index) {
+	uint32_t j = flat_index / 0x97;
+	uint32_t bucket = flat_index % 0x97;
+	if (!this->symbol_hash[bucket]) return 0;
+	if (this->symbol_hash[bucket] > this->outline->seg_inf_limit) return 0;
+	struct HItem* hitem = &this->outline->data[this->symbol_hash[bucket]-1];
+	if (!(hitem->flags & ITEM_IS_SYMBOL_ARRAY)) return 0;
+	if (!this->tag_oseg[this->symbol_hash[bucket]]) return 0;
+	uint8_t* data = this->tag_oseg[this->symbol_hash[bucket]]->data;
+	uint16_t count = *((uint16_t*)&data[0]);
+	if (j >= count) return 0;
+	uint32_t* offsets = (uint32_t*)&data[2];
+	if (offsets[j] + sizeof(struct tagPERMSYM) > hitem->size) return 0;
+	struct tagPERMSYM* permsym = (struct tagPERMSYM*)&data[offsets[j]];
+	return (uint64_t)permsym->hItem;
+}
+
+// Count children of `func_item`'s Parameters (0x89) subtree to disambiguate
+// overloads. Returns -1 if no Parameters subtree exists; otherwise the child
+// count (which is the function's arity).
+struct ArityCount { int found; uint16_t count; };
+static void arity_inner_cb(class COutline*, uint64_t, void* p) {
+	((struct ArityCount*)p)->count++;
+}
+static void arity_outer_cb(class COutline* outline, uint64_t item, void* p) {
+	struct ArityCount* ac = (struct ArityCount*)p;
+	ac->found = 1;
+	outline->find_children_of_type_and_run(arity_inner_cb, p, item, NULL, false);
+}
+static bool item_arity_matches(COutline* o, uint64_t func_item, uint8_t expected) {
+	struct ArityCount ac = {0, 0};
+	const uint16_t type[] = {0x89, 0};
+	o->find_children_of_type_and_run(arity_outer_cb, &ac, func_item, type);
+	return ac.found && ac.count == expected;
+}
+
+uint64_t COutline::permsym_item_by_flat_and_arity(uint32_t flat_index, uint8_t expected_arg_count) {
+	uint32_t j = flat_index / 0x97;
+	uint32_t bucket = flat_index % 0x97;
+	if (!this->symbol_hash[bucket]) return 0;
+	if (this->symbol_hash[bucket] > this->outline->seg_inf_limit) return 0;
+	struct HItem* hitem = &this->outline->data[this->symbol_hash[bucket]-1];
+	if (!(hitem->flags & ITEM_IS_SYMBOL_ARRAY)) return 0;
+	if (!this->tag_oseg[this->symbol_hash[bucket]]) return 0;
+	uint8_t* data = this->tag_oseg[this->symbol_hash[bucket]]->data;
+	uint16_t count = *((uint16_t*)&data[0]);
+	if (j >= count) return 0;
+	uint32_t* offsets = (uint32_t*)&data[2];
+	if (offsets[j] + sizeof(struct tagPERMSYM) > hitem->size) return 0;
+	struct tagPERMSYM* j_permsym = (struct tagPERMSYM*)&data[offsets[j]];
+	uint64_t j_hitem = (uint64_t)j_permsym->hItem;
+
+	// Without an arg-count hint, just return the j-th permsym.
+	if (expected_arg_count == 0) {
+		return j_hitem;
+	}
+	// If the j-th permsym already matches, use it.
+	if (item_arity_matches(this, j_hitem, expected_arg_count)) {
+		return j_hitem;
+	}
+
+	// Otherwise walk the rest of the bucket for permsyms with the same name
+	// (UTF-16 string compare) and a Parameters subtree of matching arity.
+	const char16_t* j_name = (const char16_t*)j_permsym->str;
+	for (uint16_t k = 0; k < count; k++) {
+		if (k == j) continue;
+		if (offsets[k] + sizeof(struct tagPERMSYM) > hitem->size) continue;
+		struct tagPERMSYM* p = (struct tagPERMSYM*)&data[offsets[k]];
+		const char16_t* k_name = (const char16_t*)p->str;
+		// utf-16 string compare (NUL-terminated)
+		bool eq = true;
+		for (size_t s = 0; ; s++) {
+			char16_t a = j_name[s], b = k_name[s];
+			if (a != b) { eq = false; break; }
+			if (a == 0) break;
+		}
+		if (!eq) continue;
+		uint64_t k_hitem = (uint64_t)p->hItem;
+		if (item_arity_matches(this, k_hitem, expected_arg_count)) {
+			return k_hitem;
+		}
+	}
+	// No better match — fall back to the j-th permsym.
+	return j_hitem;
+}
+
 const struct String* COutline::string_lookup(uint32_t string_id) {
-	if (this->string_table && this->string_table->str && string_id < this->string_table->total_num_entries) {
-		uint32_t offset = this->string_table->str[string_id];
+	if (this->string_table && string_id < this->string_table->total_num_entries) {
+		// In COutline64.cpp the alias `StringTable -> StringTable64` makes
+		// `str[]` a `uint64_t[]`; cast keeps both the 32- and 64-bit builds
+		// warning-free without changing observed behaviour.
+		uint32_t offset = (uint32_t)this->string_table->str[string_id];
 		if (offset != 0) {
 			struct String* string = (struct String*)(&this->str_data[offset]);
 			return string;
@@ -1244,7 +1696,7 @@ unsigned long COutline::OsDeCompress(unsigned long expected_output_len, void* de
 
 struct HandTable* COutline::create_handtable(struct tagOSEG* item_content, uint64_t item_id) {
 	if (item_id > this->outline->seg_inf_limit || !item_id) {
-		fprintf(stderr,"error: called create_handtable with invalid item 0x%04x\n",item_id);
+		fprintf(stderr,"error: called create_handtable with invalid item 0x%04llx\n",(unsigned long long)item_id);
 		return NULL;
 	}
 	HItem* item = &this->outline->data[item_id-1];
@@ -1257,18 +1709,18 @@ struct HandTable* COutline::create_handtable(struct tagOSEG* item_content, uint6
 	while (iterator->value & HANDTABLE_ITEMSIZE_MASK) {
 		if (item->size < offset + sizeof(tagHEAPBLK)) {
 			free(hand_table);
-			fprintf(stderr,"error: iterator ran outside of tagOSEG.data (in item 0x%04x)\n",item_id);
+			fprintf(stderr,"error: iterator ran outside of tagOSEG.data (in item 0x%04llx)\n",(unsigned long long)item_id);
 			throw new std::exception();
 		}
 		if (iterator->value & ((HANDTABLE_ITEMSIZE_MASK+1)<<1)) {
 			free(hand_table);
-			fprintf(stderr,"unsupported handle table type in item %u at 0x%08x\n",item_id,offset);
+			fprintf(stderr,"unsupported handle table type in item %llu at 0x%08x\n",(unsigned long long)item_id,offset);
 			throw new std::exception();
 		}else{
 			if (iterator->handle_id != 0 && iterator->handle_id <= item_content->seghd_maxUsedHandle) {
 				if (offset + 4*(iterator->value&HANDTABLE_ITEMSIZE_MASK) > item->size) {
 					free(hand_table);
-					fprintf(stderr,"error: iterator ran outside of tagOSEG.data (in item 0x%04x)\n",item_id);
+					fprintf(stderr,"error: iterator ran outside of tagOSEG.data (in item 0x%04llx)\n",(unsigned long long)item_id);
 					throw new std::exception();
 				}else /* if (iterator->size & (HANDTABLE_ITEMSIZE_MASK+1)) */ {
 					uint32_t size = 4 * ((iterator->value & HANDTABLE_ITEMSIZE_MASK)-1);
@@ -1278,19 +1730,18 @@ struct HandTable* COutline::create_handtable(struct tagOSEG* item_content, uint6
 					hand_table[iterator->handle_id].size = iterator->value;
 					hand_table[iterator->handle_id].memory = alloc<struct RuntimeMemory*>(sizeof(struct RuntimeMemory));
 				} /* else{
-					// TODO: unsupported data type...???
 					// empty?? reserved??
 					//fprintf(stderr,"info: item 0x%04x: unsupported flag 0x00 in HandMapItem.size field (size: 0x%04x, handle_id: 0x%04x, offset: 0x%04x)\n",item_id,iterator->size,iterator->handle_id,offset);
 				} */
 			}else{
-				fprintf(stderr,"item 0x%04x: invalid handle id: %u (must be between 1 and %u)",item_id,iterator->handle_id,item_content->seghd_maxUsedHandle);
+				fprintf(stderr,"item 0x%04llx: invalid handle id: %u (must be between 1 and %u)",(unsigned long long)item_id,iterator->handle_id,item_content->seghd_maxUsedHandle);
 			}
 		}
 		offset += 4*(iterator->value&HANDTABLE_ITEMSIZE_MASK);
 		iterator = (struct tagHEAPBLK*)((char*)item_content + offset);
 		if (item->size < offset + sizeof(struct tagHEAPBLK)) {
 			free(hand_table);
-			fprintf(stderr,"error: iterator ran outside of tagOSEG.data (in item 0x%04x)\n",item_id);
+			fprintf(stderr,"error: iterator ran outside of tagOSEG.data (in item 0x%04llx)\n",(unsigned long long)item_id);
 			throw new std::exception();
 		}
 	}
@@ -1300,11 +1751,11 @@ struct HandTable* COutline::create_handtable(struct tagOSEG* item_content, uint6
 
 bool COutline::change_item_size(uint64_t item_id, uint32_t new_size) {
 	// struct HandTable* COutline::create_handtable(struct tagOSEG* item_content, uint64_t item_id)
-	uint32_t seginf = (item_id >> ITEM_ID_WIDTH);
-	uint32_t handle_id = (item_id & ((1LL<<ITEM_ID_WIDTH)-1LL));
+	uint32_t seginf = (uint32_t)(item_id >> ITEM_ID_WIDTH);
+	uint32_t handle_id = (uint32_t)(item_id & ((1LL<<ITEM_ID_WIDTH)-1LL));
 	if (!seginf || seginf > this->outline->seg_inf_limit) {
 		if (is_verbose()) {
-			fprintf(stderr,"resize error: itemid: 0x%08x, seginf: 0x%08x\n",item_id,seginf);
+			fprintf(stderr,"resize error: itemid: 0x%08llx, seginf: 0x%08x\n",(unsigned long long)item_id,seginf);
 		}
 		return false;
 	}

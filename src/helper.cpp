@@ -17,7 +17,6 @@
  * <https://www.gnu.org/licenses/>.
  */
 
-#define _CRT_SECURE_NO_WARNINGS
 
 #include <malloc.h>
 #include <string.h>
@@ -292,11 +291,11 @@ struct tm* SecondsSinceEpochToDateTime(struct tm* pTm, int64_t SecondsSinceEpoch
   leap = !(year % 4) && (year % 100 || !(year % 400));
 
   // Calculate the day of the year and the time
-  yday = sec / 86400;
+  yday = (uint)(sec / 86400);
   sec %= 86400;
-  hour = sec / 3600;
+  hour = (uint)(sec / 3600);
   sec %= 3600;
-  min = sec / 60;
+  min = (uint)(sec / 60);
   sec %= 60;
 
   // Calculate the month
@@ -311,7 +310,7 @@ struct tm* SecondsSinceEpochToDateTime(struct tm* pTm, int64_t SecondsSinceEpoch
 
   // Fill in C's "struct tm"
   memset(pTm, 0, sizeof(*pTm));
-  pTm->tm_sec = sec;          // [0,59]
+  pTm->tm_sec = (int)sec;     // [0,59]
   pTm->tm_min = min;          // [0,59]
   pTm->tm_hour = hour;        // [0,23]
   pTm->tm_mday = mday;        // [1,31]  (day of month)
@@ -322,6 +321,103 @@ struct tm* SecondsSinceEpochToDateTime(struct tm* pTm, int64_t SecondsSinceEpoch
   pTm->tm_isdst = -1;         // daylight saving time flag
 
   return pTm;
+}
+
+#include <sys/stat.h>
+#ifdef __unix__
+#include <unistd.h>
+#elif defined(_WIN32) || defined(WIN32) || defined(_WIN64) || defined(WIN64)
+#include <direct.h>
+#endif
+
+bool sanitize_relpath(const std::string& in, std::string& out_rel) {
+	out_rel.clear();
+	if (in.empty()) return false;
+
+	std::string s = in;
+	for (char& c : s) if (c == '\\') c = '/';
+
+	if (s.size() >= 2 && s[1] == ':') return false;       // drive letter
+	if (s[0] == '/') return false;                         // absolute
+
+	size_t pos = 0;
+	bool any_component = false;
+	while (pos <= s.size()) {
+		size_t end = s.find('/', pos);
+		if (end == std::string::npos) end = s.size();
+		std::string comp = s.substr(pos, end - pos);
+		if (comp == "..") return false;
+		if (comp == ".")  return false;
+		if (comp.empty()) return false;          // empty component (// or trailing /)
+		any_component = true;
+		if (end == s.size()) break;
+		pos = end + 1;
+	}
+	if (!any_component) return false;
+
+	out_rel = s;
+	return true;
+}
+
+void mkdir_parents(const std::string& path) {
+	size_t last = path.rfind('/');
+	if (last == std::string::npos || last == 0) return;
+	std::string parent = path.substr(0, last);
+	size_t pos = 0;
+	while (pos < parent.size()) {
+		size_t end = parent.find('/', pos);
+		if (end == std::string::npos) end = parent.size();
+		std::string sub = parent.substr(0, end);
+		if (!sub.empty()) {
+#ifdef __unix__
+			mkdir(sub.c_str(), 0755);
+#else
+			// MSVC/MinGW have no `mkdir(path)` — `_mkdir` is the C-runtime spelling.
+			_mkdir(sub.c_str());
+#endif
+		}
+		if (end == parent.size()) break;
+		pos = end + 1;
+	}
+}
+
+bool write_utf16_apt(const char* path, const char* utf8_buf) {
+	FILE* f = fopen(path, "wb");
+	if (!f) return false;
+	uint8_t bom[2] = {0xff, 0xfe};
+	fwrite(bom, 1, 2, f);
+	for (const char* p = utf8_buf; *p; ) {
+		uint32_t cp;
+		uint8_t c = (uint8_t)*p++;
+		if (c < 0x80) {
+			cp = c;
+		} else if ((c & 0xe0) == 0xc0) {
+			cp = (c & 0x1f) << 6;
+			if ((*p & 0xc0) == 0x80) cp |= (*p++ & 0x3f);
+		} else if ((c & 0xf0) == 0xe0) {
+			cp = (c & 0x0f) << 12;
+			if ((*p & 0xc0) == 0x80) { cp |= (*p++ & 0x3f) << 6; }
+			if ((*p & 0xc0) == 0x80) { cp |= (*p++ & 0x3f); }
+		} else {
+			continue;
+		}
+		if (cp == '\n') {
+			uint16_t cr = '\r', lf = '\n';
+			fwrite(&cr, 2, 1, f);
+			fwrite(&lf, 2, 1, f);
+		} else if (cp < 0x10000) {
+			uint16_t w = (uint16_t)cp;
+			fwrite(&w, 2, 1, f);
+		} else {
+			cp -= 0x10000;
+			uint16_t hi = 0xd800 | (cp >> 10);
+			uint16_t lo = 0xdc00 | (cp & 0x3ff);
+			fwrite(&hi, 2, 1, f);
+			fwrite(&lo, 2, 1, f);
+		}
+	}
+	fclose(f);
+	return true;
 }
 
 // instantiate alloc functions

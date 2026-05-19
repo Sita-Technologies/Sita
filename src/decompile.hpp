@@ -49,6 +49,18 @@ struct DecompileInfo {
 	varscope var_scope;
 	uint8_t outer_precedence;
 	uint64_t* result_info; // a value that may be returned by the decompile-function
+	// If non-NULL, the enclosing call supplied a SAL-constant family for
+	// this operand (e.g. "MB_" for SalMessageBox's 3rd arg). When a literal
+	// number reaches Const() with this set, it's resolved against the family
+	// before falling back to the raw integer.
+	const char* constant_family;
+	// When IntFunction recurses into a func-ref expression (IntFunSetupLate
+	// etc.) with INTFUNCLASS expected type, this carries the call's expected
+	// arg count so the func-ref handler can disambiguate overloads via
+	// arity (late-bound polymorphic dispatch like `.._Clear` where multiple
+	// classes define different signatures). 0 means "unknown / not in call
+	// context".
+	uint8_t caller_arg_count;
 };
 
 void decompile_expression(struct DecompileInfo di);

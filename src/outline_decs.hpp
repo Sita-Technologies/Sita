@@ -46,7 +46,7 @@
 #define RUN_ONLY 0x4f4e5552 // "RUNO"
 
 // outline-flags
-#define OFLAG_APP_SYMBOLS_CURRENT 0x01 // TODO: handle flag. if this flag is set, outline->lpLibTable = OamDynLibTableStartup(); is executed
+#define OFLAG_APP_SYMBOLS_CURRENT 0x01 // if this flag is set, outline->lpLibTable = OamDynLibTableStartup(); is executed
 #define OFLAG_APP_IS_COMPILED 0x02
 #define OFLAG_APP_CHANGED 0x04
 #define OFLAG_APP_SAVE_COMPILED 0x08
@@ -285,7 +285,7 @@ struct StringTable64 {
 	uint32_t total_num_entries;
 	uint32_t num_free_entries;
 	uint64_t free_list;
-	uint64_t str[0]; // offset in decompressed data // TODO: uint64_t??
+	uint64_t str[0]; // offset in decompressed data
 };
 
 struct String {
@@ -472,7 +472,7 @@ struct tagOPERATOR {
 };
 
 struct tagEXFUNINFO {
-	uint32_t hItemLibrary; // if the value is 0x00, load function pointer from cdlli72.dll's _INT_LOCALS array. AccessKey contains the array index in this case.
+	uint32_t hItemLibrary; // if the value is 0x00, load function pointer from the cdlli runtime DLL's _INT_LOCALS array. AccessKey contains the array index in this case.
 	uint32_t hItemFun;
 	uint32_t AccessKey;
 	uint32_t lpProc;
@@ -481,7 +481,7 @@ struct tagEXFUNINFO {
 };
 
 struct tagEXFUNINFO64 {
-	uint64_t hItemLibrary; // if the value is 0x00, load function pointer from cdlli72.dll's _INT_LOCALS array. AccessKey contains the array index in this case.
+	uint64_t hItemLibrary; // if the value is 0x00, load function pointer from the cdlli runtime DLL's _INT_LOCALS array. AccessKey contains the array index in this case.
 	uint64_t hItemFun;
 	uint32_t AccessKey;
 	uint64_t lpProc;

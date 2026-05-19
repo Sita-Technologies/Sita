@@ -17,41 +17,7 @@
  * <https://www.gnu.org/licenses/>.
  */
 
+#include "COutline.hpp"
 
-#undef  tagPERMSYM
-#undef  StringTable
-#undef  tagITEM
-#undef  tagOSEG
-#undef  HandTable
-#undef  SymbolHash
-#undef  HItem
-#undef  tagHEAPBLK
-#undef  Outline
-#undef  COutline
-#undef  Item
-#undef  CItem
-#undef  CVar
-#undef  CVarScope
-#undef  CGlobalDecs
-#undef  CClass
-#undef  CObject
-#undef  CDlg
-#undef  CCase
-#undef  COn
-#undef  CStatement
-#undef  CString
-#undef  CBoolean
-#undef  CDateTime
-#undef  CNumber
-#undef  CFunctionalVar
-#undef  COutlineVersion
-#undef  CClassDefinitions
-#undef  CLoop
-#undef  CBreak
-#undef  tag_items
-#undef  item_bodies
-#undef  DecompileInfo
-#undef  DispatchFunction
-#undef  tagEXFUNINFO
-#undef  tagINTFUNHITEMS
-#undef  tagRESNAME
+#define TDx64
+#include "process_outline.cpp"

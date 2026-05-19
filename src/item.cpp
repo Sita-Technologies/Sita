@@ -17,7 +17,6 @@
  * <https://www.gnu.org/licenses/>.
  */
 
-#define _CRT_SECURE_NO_WARNINGS
 
 #ifdef __unix__ 
 #include <iconv.h>
@@ -33,6 +32,7 @@
 #include "SalNumber.hpp"
 #include "item.hpp"
 #include "COutline.hpp"
+#include "process_outline.hpp"
 #include <stdio.h>
 #include <string.h>
 #include <exception>
@@ -172,7 +172,8 @@ const char* get_event_name(struct ItemBody* item_body) {
 	if (item_body->type != 0x2f) {
 		return NULL;
 	}
-	uint32_t event = *((uint32_t*)&item_body->size);
+	uint32_t event;
+	memcpy(&event, &item_body->size, sizeof(event));
 
 	switch (event) {
 	case 0x0010:
@@ -253,6 +254,14 @@ const char* get_event_name(struct ItemBody* item_body) {
 		return "SAM_DockResizeNotify";
 	case 0x2055:
 		return "SAM_SessionError";
+	case 0x2009:
+		return "SAM_DoubleClick";
+	case 0x200a:
+		return "SAM_ScrollBar";
+	case 0x2016:
+		return "SAM_CornerClick";
+	case 0x2057:
+		return "SAM_TabChange";
 	case 0x2063:
 		return "SAM_NetException";
 	case 0x2064:
@@ -271,13 +280,32 @@ const char* get_event_name(struct ItemBody* item_body) {
 		return "SAM_ThreadEvent";
 	case 0x2072:
 		return "SAM_NotifyIcon";
+	case 0x2076:
+		return "SAM_RTFPaste";
 	case 0x4000:
 		return "SAM_User";
+	// Windows messages passed through TD. Not SAM_ but SAL event handlers
+	// CAN be registered for them, so they appear in compiled Message Actions.
+	case 0x0005: return "WM_SIZE";
+	case 0x000F: return "WM_PAINT";
+	case 0x002B: return "WM_DRAWITEM";
+	case 0x002C: return "WM_MEASUREITEM";
+	case 0x0100: return "WM_KEYDOWN";
+	case 0x0101: return "WM_KEYUP";
+	case 0x0102: return "WM_CHAR";
+	case 0x0111: return "WM_COMMAND";
+	case 0x0200: return "WM_MOUSEMOVE";
+	case 0x0201: return "WM_LBUTTONDOWN";
+	case 0x0202: return "WM_LBUTTONUP";
+	case 0x0203: return "WM_LBUTTONDBLCLK";
+	case 0x0204: return "WM_RBUTTONDOWN";
+	case 0x0205: return "WM_RBUTTONUP";
+	case 0x0206: return "WM_RBUTTONDBLCLK";
 	case 0x03e0:
 		if (is_verbose()) {
 			return "WM_DDE_First ! aka WM_DDE_Initiate";
 		}
-		return "WM_DDE_First"; // also called/same as: WM_DDE_Initiate // TODO: when print which one?
+		return "WM_DDE_First"; // same numeric constant as WM_DDE_Initiate — known compiler loss
 	case 0x03e1:
 		return "WM_DDE_Terminate";
 	case 0x03e2:
@@ -435,12 +463,18 @@ void CItem::print_all_itembodies(class COutline* outline, uint64_t item_id) {
 			case 2:
 				oprintf("0x%04x",item_body->size);
 				break;
-			case 4:
-				oprintf("0x%08x",*((uint32_t*)&item_body->size));
+			case 4: {
+				uint32_t v;
+				memcpy(&v, &item_body->size, sizeof(v));
+				oprintf("0x%08x",v);
 				break;
-			case 8:
-				oprintf("0x%08x;0x%08x",((uint32_t*)&item_body->size)[0],((uint32_t*)&item_body->size)[1]);
+			}
+			case 8: {
+				uint32_t v[2];
+				memcpy(v, &item_body->size, sizeof(v));
+				oprintf("0x%08x;0x%08x",v[0],v[1]);
 				break;
+			}
 			default:
 				oputs("[[");
 				for (uint32_t i=1 + (item_bodies[item_body->type].size==0?2:0) ;i<s;i++) {
@@ -484,16 +518,35 @@ void CItem::itembody_add_string(class COutline* outline, uint64_t item_id, const
 }
 
 void CItem::decompile(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
-	if (get_app_output_filename() && !get_itembody(outline, item_id, 0x01)) {
+	if (is_binary_app_output() && !get_itembody(outline, item_id, 0x01)) {
 
 		const char16_t* str = outline->symbol_lookup(item_id);
 		if (str) {
 			size_t len = strlen_utf16(str)+2;
 			if (len) {
-				struct ItemBody* out = alloc<struct ItemBody*>(sizeof(struct ItemBody)+len);
+				// Append array suffix to name for binary output — see
+				// decompile_helper for the full explanation. Same applies
+				// here for variable types registered as plain `CVar(...)`
+				// in tag_items[] (Number / Date/Time / String / Boolean /
+				// File Handle / Sql Handle / Window Handle / Session Handle
+				// / Long String / Binary), which inherit CItem::decompile
+				// rather than overriding it.
+				char arr_buf[128];
+				size_t arr_n = format_array_suffix(outline, item_id, arr_buf, sizeof(arr_buf));
+				size_t arr_utf16 = arr_n * 2;
+				struct ItemBody* out = alloc<struct ItemBody*>(sizeof(struct ItemBody)+len+arr_utf16);
 				out->type = 0x01;
-				out->size = (uint16_t)len;
+				out->size = (uint16_t)(len + arr_utf16);
 				memcpy(out->data,str,len);
+				if (arr_n) {
+					uint8_t* p = out->data + len - 2;
+					for (size_t i = 0; i < arr_n; i++) {
+						*p++ = (uint8_t)arr_buf[i];
+						*p++ = 0;
+					}
+					*p++ = 0;
+					*p = 0;
+				}
 				add_itembody(outline, item_id, out);
 				free(out);
 			}
@@ -535,29 +588,50 @@ void CItem::decompile(class COutline* outline, uint64_t item_id, uint64_t* memor
 	}
 }
 
-void CItem::print_array_boundaries(class COutline* outline, uint64_t item_id) {
-	// print array bounds
+// Helper: format the array suffix for an item into a caller's ASCII buffer
+// (e.g. "[*]", "[10]", "[1:5]"). Returns chars written (excluding terminating
+// NUL). Returns 0 if the item has no MDARRAYBOUNDS body (i.e. not an array).
+// Both the text-output `print_array_boundaries` path and the binary-output
+// `-a` path that builds body 0x01 (TEXT) need to spell the same suffix; this
+// helper keeps the format consistent.
+size_t CItem::format_array_suffix(class COutline* outline, uint64_t item_id, char* out, size_t out_sz) {
 	struct ItemBody* item_body = get_itembody(outline, item_id, 0x28);
-	if (item_body) {
-		uint32_t* array_boundaries = (uint32_t*)item_body->data;
-		if (array_boundaries[0]) {
-			oputs("[");
-			for (uint32_t d=0;d<array_boundaries[0];d++) {
-				if (d) {
-					oputs(",");
-				}
-				uint32_t lower = array_boundaries[2*d+1];
-				uint32_t upper = array_boundaries[2*d+2];
-				if (!lower && !upper) {
-					oputs("*");
-				}else if (!lower) {
-					oprintf("%lu",((uint64_t)upper)+1);
-				}else{
-					oprintf("%u:%u",lower,upper);
-				}
-			}
-			oputs("]");
+	if (!item_body) return 0;
+	if (out_sz == 0) return 0;
+	uint32_t* array_boundaries = (uint32_t*)item_body->data;
+	if (!array_boundaries[0]) return 0;
+	size_t pos = 0;
+	auto put = [&](char c) { if (pos + 1 < out_sz) out[pos++] = c; };
+	auto putn = [&](uint64_t n) {
+		char tmp[24];
+		int t = snprintf(tmp, sizeof(tmp), "%llu", (unsigned long long)n);
+		for (int i = 0; i < t; i++) put(tmp[i]);
+	};
+	put('[');
+	for (uint32_t d = 0; d < array_boundaries[0]; d++) {
+		if (d) put(',');
+		uint32_t lower = array_boundaries[2*d+1];
+		uint32_t upper = array_boundaries[2*d+2];
+		if (!lower && !upper) {
+			put('*');
+		} else if (!lower) {
+			putn((uint64_t)upper + 1);
+		} else {
+			putn(lower);
+			put(':');
+			putn(upper);
 		}
+	}
+	put(']');
+	if (pos < out_sz) out[pos] = 0;
+	return pos;
+}
+
+void CItem::print_array_boundaries(class COutline* outline, uint64_t item_id) {
+	char buf[128];
+	size_t n = format_array_suffix(outline, item_id, buf, sizeof(buf));
+	if (n) {
+		oputs(buf);
 	}
 }
 
@@ -574,7 +648,7 @@ void CItem::add_itembody(class COutline* outline, uint64_t item_id, struct ItemB
 	}
 	uint16_t size = itembody_elementsize(item_body);
 	if (!outline->change_item_size(item_id, p_item->data_length + size)) {
-		fprintf(stderr,"error: resize of item 0x%08x failed\n",item_id);
+		fprintf(stderr,"error: resize of item 0x%08llx failed\n",(unsigned long long)item_id);
 		return;
 	}
 	p_item = outline->get_item(item_id);
@@ -626,6 +700,7 @@ void CItem::addvar(class COutline* outline, uint64_t memory_item, varscope var_s
 	uint32_t var_size = 0x00;
 	struct ItemBody* item_body;
 	item_body = get_itembody(outline, item, 0x33);
+	bool has_offset_body = item_body != nullptr;
 	if (item_body) {
 		var_offset = *((uint32_t*)((uint8_t*)item_body+1));
 	}
@@ -665,7 +740,7 @@ void CItem::addvar(class COutline* outline, uint64_t memory_item, varscope var_s
 
 		// class object in contents of form window...?
 		if (var_scope == varscope::CURRENT_FORM) {
-			uint32_t object_class = CObject::get_class(outline, item);
+			uint64_t object_class = CObject::get_class(outline, item);
 			if (object_class && outline->has_any_variable(object_class, varscope::CURRENT_OBJECT)) {
 				outline->add_variable(memory_item, var_scope, var_offset, item);
 				outline->add_variable(item, var_scope, 0, object_class);
@@ -679,12 +754,669 @@ void CItem::addvar(class COutline* outline, uint64_t memory_item, varscope var_s
 		}
 		return; // don't add variable of empty size
 		*/
+
+		// Decoration items inside `Window Variables` / `Contents` (e.g.
+		// GROUP_SEPARATOR / `! ` lines, type 0x7e) carry neither body 0x33
+		// (offset) nor body 0x2f (size), and they did not match any of the
+		// dynalib / class-object paths above. Registering them at offset 0
+		// would shadow the real first variable. Skip them.
+		if (!has_offset_body) {
+			return;
+		}
+	}
+
+	// A Contents control (body 0x0b, no var_size) whose body 0x33 holds
+	// the Contents-block's shared offset (not a real per-control offset)
+	// collides with a legit Window Parameter / Window Variable at the same
+	// slot. Skip such controls.
+	//
+	// Distinguishing trait: Child Grid / Child Table (the only Contents
+	// item types that contain accessible per-instance state — their
+	// Window Variables register at CURRENT_OBJECT scope of the item via
+	// CDlgParent::first_pass) keep their registration. Plain Background
+	// Text / Pushbutton / Group Box / etc. fall through and get skipped —
+	// they don't expose any name resolvable through the form's CURRENT_FORM
+	// scope anyway.
+	tagITEM* p_item_for_check = outline->get_item(item);
+	if (var_size == 0
+			&& get_itembody(outline, item, 0x0b)
+			&& p_item_for_check
+			&& p_item_for_check->type < TAG_ITEMS_AMOUNT
+			&& !dynamic_cast<CDlgParent*>(::tag_items[p_item_for_check->type])) {
+		return;
 	}
 
 	outline->add_variable(memory_item, var_scope, var_offset, item);
 }
 
 CItem::~CItem() {
+}
+
+// Body types emitted as `.data <NAME> ... .enddata` blocks by the runtime's
+// SalOutlineSaveAsText writer. Each entry pairs an ItemBody type id with the
+// canonical name printed after `.data `. RESOURCE has a different shape
+// (`.data RESOURCE <a> <b> <c> <d>` with extra header values) and is handled
+// separately. METAFILEPICT / ICON / SQLWB / QUEST* / VIEWSIZE / INHERITQUEST
+// / CLASS_DISPATCH all have val3=1 in the body table but are not currently
+// emitted; extend the table if they appear in real input.
+struct DataBlockEmit {
+	uint8_t body_type;   // ItemBody.type
+	const char* name;    // string after ".data "
+};
+static const DataBlockEmit kDataBlockEmits[] = {
+	{ 0x1c, "VIEWINFO" },
+	{ 0x1f, "CCDATA" },
+	{ 0x20, "CCSIZE" },
+	// DT_MAKERUNDLG (0x2c) intentionally skipped — it embeds runtime
+	// paths to the build's `.exe`/`.dll`/`.apc`/`.apl` siblings. The
+	// runtime `bx` step uses those paths to locate sibling artifacts,
+	// so emitting the body verbatim from a .exe input + then rebuilding
+	// under a different output filename breaks bx silently. The runtime
+	// regenerates DT_MAKERUNDLG itself during build — leaving it stripped
+	// is correct behaviour.
+	{ 0x35, "ONX_INT" },
+	{ 0x23, "CLASSPROPS" },
+	{ 0x24, "CLASSPROPSSIZE" },
+	{ 0x27, "INHERITPROPS" },
+	{ 0x1a, "RESOURCE" },
+};
+
+// Emit the hex-grid for a `.data` block payload. Layout (matches the
+// runtime's SalOutlineSaveAsText writer):
+//   - 32 bytes per line, prefixed `<offset_hex_4>: `
+//   - Bytes are grouped by 8 bytes per group separated by single spaces;
+//     within a group, hex digits are continuous (no space between bytes)
+//   - Final partial line stops mid-grid at the last byte; trailing newline
+static void print_data_block_hex(const uint8_t* payload, uint32_t length) {
+	for (uint32_t off = 0; off < length; off += 32) {
+		oprintf("%04X: ", off);
+		uint32_t line_end = off + 32;
+		if (line_end > length) line_end = length;
+		for (uint32_t i = off; i < line_end; i++) {
+			if (i != off && (i - off) % 8 == 0) {
+				oputs(" ");
+			}
+			oprintf("%02X", payload[i]);
+		}
+		oputs("\n");
+	}
+}
+
+// Emit `.data <NAME>\n<hex>\n.enddata\n` for any data-shaped body found on
+// the item. Order matches the body chain (which is the same order the
+// runtime emits its `.data` blocks at). The lines are flush-left (no
+// `.head` prefix). RESOURCE is handled separately (extra leading numeric
+// header).
+void CItem::print_data_blocks(class COutline* outline, uint64_t item_id) {
+	if (is_binary_app_output()) {
+		return;
+	}
+	tagITEM* p_item = outline->get_item(item_id);
+	if (!p_item) return;
+	// Skip imported items: tagITEM.flags bit 0x400 marks an item that came
+	// from a `File Include:`-pulled .apl/.app and is reproduced here as a
+	// local copy for the runtime resolver. The text writer does NOT emit
+	// .data blocks for such items — the library carries them.
+	if (p_item->flags & 0x400) {
+		return;
+	}
+	for (struct ItemBody* ib = itembody_next(0, p_item); ib; ib = itembody_next(ib, p_item)) {
+		const char* name = nullptr;
+		bool has_resource_header = false;
+		for (size_t k = 0; k < sizeof(kDataBlockEmits)/sizeof(kDataBlockEmits[0]); k++) {
+			if (ib->type == kDataBlockEmits[k].body_type) {
+				name = kDataBlockEmits[k].name;
+				has_resource_header = (ib->type == 0x1a); // RESOURCE
+				break;
+			}
+		}
+		if (!name) continue;
+		// Compute payload pointer + length per body shape.
+		// item_bodies[t].size: 0 = variable (size-field is byte length), N>0
+		// = fixed inline value (size-field IS the value, N bytes).
+		uint8_t fixed_sz = item_bodies[ib->type].size;
+		const uint8_t* payload;
+		uint32_t length;
+		if (fixed_sz == 0) {
+			payload = ib->data;
+			length = ib->size;
+		} else {
+			payload = (const uint8_t*)&ib->size;
+			length = fixed_sz;
+		}
+		if (has_resource_header) {
+			// RESOURCE bodies in the runtime's text output carry a header
+			// line:
+			//   `.data RESOURCE <a> <b> <c> <d>`
+			// where the four numbers come from the 16-byte ResHdr that
+			// precedes the variable resource bytes. Until the header
+			// layout is fully decoded across all RESOURCE shapes, fall
+			// back to plain `.data RESOURCE` without the four numbers —
+			// the runtime still accepts it on re-load (the header is
+			// rebuilt from the bytes themselves).
+			oprintf(".data %s\n", name);
+		} else {
+			oprintf(".data %s\n", name);
+		}
+		print_data_block_hex(payload, length);
+		oputs(".enddata\n");
+	}
+}
+
+// Emit a synthetic `Resource Id: <decimal>` child line if the item carries
+// a RESOURCEID body (0x15). The runtime writer prints this line at
+// indent+1 between the parent's main line and its real children. The body
+// is a 2-byte fixed value at &item_body->size. Only emit in text mode
+// (binary outputs already preserve the body in the .app), and only for
+// non-imported items (the runtime does NOT emit synthetic `Resource Id:`
+// lines for items pulled in by File Include from a library .apl — the
+// library carries them already; emitting here would create duplicate
+// `Duplicate symbol` errors at cbi -b time). Triggered for
+// Menu (0x128), Menu Item (0xa2), Windows Menu (0x12c), Toolbar Button
+// (0x29c), and any other item type whose binary form carries a
+// RESOURCEID body — same general gate as `.data` emission.
+static void print_synth_resource_id(class COutline* outline, uint64_t item_id, uint32_t indention) {
+	if (is_binary_app_output()) return;
+	tagITEM* p_item = outline->get_item(item_id);
+	if (!p_item) return;
+	if (p_item->flags & 0x400) return; // imported — library carries it
+	struct ItemBody* ib = CItem::get_itembody(outline, item_id, 0x15);
+	if (!ib) return;
+	uint16_t value = ib->size; // RESOURCEID is 2-byte fixed: value at &ib->size
+	print_indent(indention + 1);
+	oprintf("Resource Id: %u\n", value);
+}
+
+// Helper for the WINATTR handle-scan (Title / Status Text / ToolTip
+// emission). Validates that handle_id `h` in OSEG `seginf` references a
+// length-prefixed UTF-16LE string heap block, and writes the decoded
+// chars into out_chars[0..*out_chars_count]. Returns true on success;
+// false for invalid handles, tagITEM-tagged blocks (those carry real
+// items, not strings), zero-length / out-of-bounds payloads, or lengths
+// that imply non-text (odd byte count, empty after null-strip, etc.).
+// Layout: `[uint16 length_in_bytes][UTF-16LE chars, usually null-
+// terminated][padding to 4-byte boundary]`.
+static bool decode_string_handle(class COutline* outline,
+                                 uint32_t seginf, uint32_t handle_id,
+                                 const char16_t** out_chars, size_t* out_count) {
+	if (handle_id == 0 || handle_id > outline->get_max_handle(seginf)) return false;
+	if (outline->is_handle_tagitem(seginf, handle_id)) return false;
+	uint8_t* raw = outline->get_handle_data(seginf, handle_id);
+	if (!raw) return false;
+	uint32_t blk = outline->get_handle_data_size(seginf, handle_id);
+	if (blk < 2) return false;
+	uint16_t length_bytes = (uint16_t)raw[0] | ((uint16_t)raw[1] << 8);
+	// Bounds: length+2 (for the length field itself) must fit in the block.
+	// Guard against junk bodies that happen to pass the handle-tag check.
+	if (length_bytes < 2 || length_bytes > blk - 2 || (length_bytes & 1)) return false;
+	const char16_t* chars = (const char16_t*)(raw + 2);
+	size_t n = length_bytes / 2;
+	while (n > 0 && chars[n - 1] == 0) n--;
+	if (n == 0) return false;
+	// Reject obviously non-text payloads: any embedded NUL or control char
+	// other than \t/\r/\n. Real menu/control titles are printable strings
+	// (sometimes with `&` mnemonic and the occasional accented char).
+	for (size_t i = 0; i < n; i++) {
+		uint16_t c = (uint16_t)chars[i];
+		if (c == 0) return false;
+		if (c < 0x20 && c != '\t' && c != '\r' && c != '\n') return false;
+	}
+	*out_chars = chars;
+	*out_count = n;
+	return true;
+}
+
+// Per-(item-type, slot) WINATTR offset table. Each entry says: "for items
+// of type T, the runtime's pseudo-child <slot> is the string handle stored
+// at WINATTR byte offset N".
+struct WinAttrStringSlot {
+	uint16_t item_type;
+	const char* slot_label; // emitted verbatim: "Title:" / "Status Text:" /
+	                        //                   "ToolTip:" / "Picture File Name:"
+	uint16_t winattr_offset; // u16-aligned offset of the handle-id in WINATTR
+};
+static const WinAttrStringSlot kWinAttrStringSlots[] = {
+	// Form Window (0x01)
+	{ 0x0001, "Title:",              24 },
+	// Table Window (0x02)
+	{ 0x0002, "Title:",              24 },
+	// Pushbutton (0x06)
+	{ 0x0006, "Title:",              36 },
+	{ 0x0006, "Picture File Name:", 124 },
+	{ 0x0006, "ToolTip:",           152 },
+	// Radio Button (0x07)
+	{ 0x0007, "Title:",              36 },
+	// Check Box (0x08)
+	{ 0x0008, "Title:",              36 },
+	// Group Box (0x09)
+	{ 0x0009, "Title:",             118 },
+	// Background Text (0x0c)
+	{ 0x000c, "Title:",             118 },
+	// Column (0x0d)
+	{ 0x000d, "Title:",              36 },
+	// MDI Window (0x13)
+	{ 0x0013, "Title:",              24 },
+	// Option Button (0x14)
+	{ 0x0014, "Title:",              36 },
+	{ 0x0014, "Picture File Name:", 120 },
+	// Dialog Box (0x42)
+	{ 0x0042, "Title:",              24 },
+	// Menu Item (0xa2)
+	{ 0x00a2, "Title:",               6 },
+	{ 0x00a2, "Status Text:",        20 },
+	// Popup Menu (0xb8)
+	{ 0x00b8, "Title:",               6 },
+	{ 0x00b8, "Status Text:",        20 },
+	// Form Window Class (0xf7) — when used as a class header
+	{ 0x00f7, "Title:",               6 },
+	// Pushbutton Class (0xfc)
+	{ 0x00fc, "Title:",               6 },
+	// Quest Table Window (0x112)
+	{ 0x0112, "Title:",              24 },
+	// Menu (0x128)
+	{ 0x0128, "Title:",              14 },
+	{ 0x0128, "Status Text:",        20 },
+	// Windows Menu (0x12c)
+	{ 0x012c, "Title:",              14 },
+	{ 0x012c, "Status Text:",        20 },
+	// Tab (0x240) — older Tab Bar Tab
+	{ 0x0240, "Title:",              28 },
+	// Grid Window (0x25c)
+	{ 0x025c, "Title:",              24 },
+	// Pane Separator (0x282)
+	{ 0x0282, "Title:",              40 },
+	// Tab (0x2bd) — Ribbon-style Tab
+	{ 0x02bd, "Title:",               6 },
+	// Button (0x2c0) — Ribbon Button
+	{ 0x02c0, "Title:",              10 },
+	{ 0x02c0, "Picture File Name:",  16 },
+	{ 0x02c0, "ToolTip:",            28 },
+	// Group (0x2c1) — Ribbon Group
+	{ 0x02c1, "Title:",               6 },
+	// Dropdown (0x2c2) — Ribbon Dropdown
+	{ 0x02c2, "Title:",               6 },
+	{ 0x02c2, "ToolTip:",            12 },
+	{ 0x02c2, "Picture File Name:",  22 },
+	// Check Button (0x2c6) — Ribbon Check Button
+	{ 0x02c6, "Title:",              10 },
+	{ 0x02c6, "Picture File Name:",  16 },
+	// Radio Button (0x2c7) — Ribbon Radio Button
+	{ 0x02c7, "Title:",              10 },
+	{ 0x02c7, "Picture File Name:",  16 },
+	{ 0x02c7, "ToolTip:",            28 },
+	// Combo (0x2c8) — Ribbon Combo
+	{ 0x02c8, "Title:",              10 },
+	{ 0x02c8, "ToolTip:",            36 },
+	// DataField (0x2c9) — Ribbon DataField
+	{ 0x02c9, "Title:",              10 },
+	{ 0x02c9, "ToolTip:",            32 },
+};
+
+static void print_synth_winattr_strings(class COutline* outline, uint64_t item_id,
+                                        uint32_t indention) {
+	if (is_binary_app_output()) return;
+	tagITEM* p_item = outline->get_item(item_id);
+	if (!p_item) return;
+	if (p_item->flags & 0x400) return; // imported — library carries it
+	struct ItemBody* ib = CItem::get_itembody(outline, item_id, 0x14);
+	if (!ib) return;
+	uint32_t seginf = (uint32_t)(item_id >> ITEM_ID_WIDTH);
+	const uint8_t* d = ib->data;
+	uint32_t end = ib->size;
+	// Walk slot table; emit each slot whose handle id at the registered
+	// offset decodes to a valid raw-string heap block.
+	for (size_t k = 0; k < sizeof(kWinAttrStringSlots)/sizeof(kWinAttrStringSlots[0]); k++) {
+		const WinAttrStringSlot& slot = kWinAttrStringSlots[k];
+		if (slot.item_type != p_item->type) continue;
+		if ((uint32_t)slot.winattr_offset + 2 > end) continue;
+		uint16_t h = (uint16_t)d[slot.winattr_offset]
+		           | ((uint16_t)d[slot.winattr_offset + 1] << 8);
+		if (h == 0) continue;
+		const char16_t* chars = nullptr;
+		size_t n = 0;
+		if (!decode_string_handle(outline, seginf, h, &chars, &n)) continue;
+		print_indent(indention + 1);
+		oprintf("%s ", slot.slot_label);
+		print_utf16(chars, n * 2);
+		oputs("\n");
+	}
+}
+
+// Per-(item-type) Data Type slot offset in WINATTR. Data Field (0x04) and
+// Column (0x0d) both encode the variable's data type as a single byte at
+// fixed offsets:
+//   1 = Date/Time, 2 = Number, 4 = String, 6 = Long String
+// Multiline Field uses "String Type:" rather than "Data Type:" — different
+// slot name, not currently emitted.
+//
+// Why this matters: the runtime's `bx` link pass binds typed call-arguments
+// against function Parameters. When `-t` text emission omits the `Data
+// Type:` synth-child of a Data Field, the runtime's cx infers the default
+// type (which may differ from the original) and bx fails with "Function
+// argument N does not match declared data type" / "Assignment of different
+// types" for every reference to the variable.
+struct WinAttrDataTypeSlot {
+	uint16_t item_type;
+	uint16_t winattr_offset;
+	bool wrap_in_data_block; // true → emit `Data\n  Data Type: T` (Data Field
+	                         //         shape); false → emit `Data Type: T`
+	                         //         flat (Column shape).
+};
+static const WinAttrDataTypeSlot kWinAttrDataTypeSlots[] = {
+	{ 0x0004, 40, true  },  // Data Field — wraps in `Data` block
+	{ 0x000d, 54, false },  // Column — emits `Data Type:` flat
+};
+
+static const char* data_type_name(uint8_t v) {
+	switch (v) {
+		case 1: return "Date/Time";
+		case 2: return "Number";
+		case 4: return "String";
+		case 6: return "Long String";
+		default: return nullptr; // unknown / Class Default — skip
+	}
+}
+
+// Emit `Data` block synthetic-children for a Data Field or Column item:
+//
+//   <indent+1>  Data
+//   <indent+2>  Data Type: <T>
+//
+// (Only `Data Type:` is emitted — it's the load-bearing slot for the
+// runtime's argument-type binding.) Routed via CItem::print_extra_lines's
+// normal path. Limited to types where the per-type WINATTR offset is
+// known and the byte decodes to a recognized type name (1 / 2 / 4 / 6 —
+// anything else falls through silently rather than emit a wrong type).
+static void print_synth_data_type(class COutline* outline, uint64_t item_id, uint32_t indention) {
+	if (is_binary_app_output()) return;
+	tagITEM* p_item = outline->get_item(item_id);
+	if (!p_item) return;
+	if (p_item->flags & 0x400) return; // imported
+	const WinAttrDataTypeSlot* slot = nullptr;
+	for (size_t k = 0; k < sizeof(kWinAttrDataTypeSlots)/sizeof(kWinAttrDataTypeSlots[0]); k++) {
+		if (kWinAttrDataTypeSlots[k].item_type == p_item->type) {
+			slot = &kWinAttrDataTypeSlots[k]; break;
+		}
+	}
+	if (!slot) return;
+	struct ItemBody* ib = CItem::get_itembody(outline, item_id, 0x14);
+	if (!ib || ib->size <= slot->winattr_offset) return;
+	uint8_t byte = ib->data[slot->winattr_offset];
+	const char* type_name = data_type_name(byte);
+	if (!type_name) return;
+	if (slot->wrap_in_data_block) {
+		print_indent(indention + 1);
+		oputs("Data\n");
+		print_indent(indention + 2);
+		oprintf("Data Type: %s\n", type_name);
+	} else {
+		// Column emits Data Type flat at indent+1.
+		print_indent(indention + 1);
+		oprintf("Data Type: %s\n", type_name);
+	}
+}
+
+// Per-type geometry slot offsets in WINATTR. The runtime emits a `Window
+// Location and Size` block with `Left:` / `Top:` / `Width:` / `Height:`
+// synthesised children (values in 1/1000-inch units, 4-byte u32). Each
+// item type has its own per-slot offset (the WINATTR prefix length
+// differs by type because each type's WINATTR carries type-specific
+// fields before the geometry block).
+struct WinAttrGeomSlot {
+	uint16_t item_type;
+	uint16_t left_off, top_off, width_off, height_off;
+};
+static const WinAttrGeomSlot kWinAttrGeomSlots[] = {
+	// Form Window (0x01)
+	{ 0x0001,  86,  98, 110, 126 },
+	// Table Window (0x02)
+	{ 0x0002,  74,  86,  98, 114 },
+	// Child Table (0x03)
+	{ 0x0003,  36,  48,  60,  76 },
+	// Data Field (0x04)
+	{ 0x0004,  52,  64,  76,  92 },
+	// Multiline Field (0x05)
+	{ 0x0005,  64,  76,  88, 104 },
+	// Pushbutton (0x06)
+	{ 0x0006,  42,  54,  66,  82 },
+	// Radio Button (0x07)
+	{ 0x0007,  42,  54,  66,  82 },
+	// Check Box (0x08)
+	{ 0x0008,  42,  54,  66,  82 },
+	// Group Box (0x09)
+	{ 0x0009,  28,  40,  52,  68 },
+	// Horizontal Scroll Bar (0x0a)
+	{ 0x000a,  36,  48,  60,  76 },
+	// Background Text (0x0c)
+	{ 0x000c,  28,  40,  52,  68 },
+	// Column (0x0d) — only Width slot (Column has no Left/Top)
+	{ 0x000d,   0,   0,  66,   0 },
+	// List Box (0x0e)
+	{ 0x000e,  36,  48,  60,  76 },
+	// Combo Box (0x0f)
+	{ 0x000f,  36,  48,  60,  76 },
+	// Frame (0x10)
+	{ 0x0010,  28,  40,  52,  68 },
+	// Picture (0x12)
+	{ 0x0012,  36,  48,  60,  76 },
+	// MDI Window (0x13)
+	{ 0x0013,  58,  70,  82,  98 },
+	// Option Button (0x14)
+	{ 0x0014,  42,  54,  66,  82 },
+	// Dialog Box (0x42)
+	{ 0x0042,  58,  70,  82,  98 },
+	// Combo Box Class (0x103)
+	{ 0x0103,   6,  18,  30,  46 },
+	// MDI Window Class (0x120) — Width/Height differ from Left/Top
+	{ 0x0120,  40,  52,  64,  80 },
+	// Date Picker (0x225)
+	{ 0x0225,   0,  48,  60,  76 },
+	// Date Time Picker (0x22c)
+	{ 0x022c,  36,  48,  60,  76 },
+	// Child Grid (0x235)
+	{ 0x0235,  36,  48,  60,  76 },
+	// Tab Bar (0x23a)
+	{ 0x023a,   0,   0,  60,  76 },
+	// Rich Text Control (0x245)
+	{ 0x0245,  52,  64,  76,  92 },
+	// Grid Window (0x25c)
+	{ 0x025c,   0,   0,  98, 114 },
+	// Tree Control (0x26b)
+	{ 0x026b,   0,  54,  66,  82 },
+};
+
+static void print_synth_form_geometry(class COutline* outline, uint64_t item_id, uint32_t indention) {
+	if (is_binary_app_output()) return;
+	tagITEM* p_item = outline->get_item(item_id);
+	if (!p_item) return;
+	if (p_item->flags & 0x400) return; // imported — library carries it
+	const WinAttrGeomSlot* slot = nullptr;
+	for (size_t k = 0; k < sizeof(kWinAttrGeomSlots)/sizeof(kWinAttrGeomSlots[0]); k++) {
+		if (kWinAttrGeomSlots[k].item_type == p_item->type) {
+			slot = &kWinAttrGeomSlots[k]; break;
+		}
+	}
+	if (!slot) return;
+	struct ItemBody* ib = CItem::get_itembody(outline, item_id, 0x14);
+	if (!ib) return;
+	const uint8_t* d = ib->data;
+	uint32_t end = ib->size;
+	auto u32_at = [&](uint32_t off) -> uint32_t {
+		if (off + 4 > end) return 0;
+		return (uint32_t)d[off] | ((uint32_t)d[off+1] << 8)
+		     | ((uint32_t)d[off+2] << 16) | ((uint32_t)d[off+3] << 24);
+	};
+	uint32_t L = slot->left_off ? u32_at(slot->left_off) : 0;
+	uint32_t T = slot->top_off ? u32_at(slot->top_off) : 0;
+	uint32_t W = slot->width_off ? u32_at(slot->width_off) : 0;
+	uint32_t H = slot->height_off ? u32_at(slot->height_off) : 0;
+	// Skip if all four are 0 (entirely Default — no Window Location and
+	// Size block needed).
+	if (L == 0 && T == 0 && W == 0 && H == 0) return;
+	// Decide whether to wrap in `Window Location and Size`. Form / Table /
+	// Dialog Box / Frame / Group Box / etc. emit the wrapper plus L/T/W/H
+	// as nested children. But Column (0x0d) emits `Width:` directly under
+	// Column without the wrapper — wrapping it triggers a "This item type
+	// is not allowed here" error at cx time. Heuristic: types with NO
+	// Left/Top slot (only Width or Height) emit slots flat at indent+1;
+	// everything else wraps.
+	bool use_wrapper = (slot->left_off != 0) || (slot->top_off != 0);
+	uint32_t base_indent = indention + 1 + (use_wrapper ? 1 : 0);
+	auto emit_inch = [&](const char* label, uint16_t off, uint32_t value) {
+		if (!off) return; // slot not registered for this type — skip
+		print_indent(base_indent);
+		oprintf("%s ", label);
+		if (value == 0) {
+			oputs("Default\n");
+		} else {
+			uint32_t whole = value / 1000;
+			uint32_t frac = value % 1000;
+			char buf[32];
+			snprintf(buf, sizeof(buf), "%u.%03u", whole, frac);
+			size_t len = 0;
+			while (buf[len]) len++;
+			while (len > 0 && buf[len-1] == '0') { buf[--len] = 0; }
+			if (len > 0 && buf[len-1] == '.') { buf[--len] = 0; }
+			oprintf("%s\"\n", buf);
+		}
+	};
+	if (use_wrapper) {
+		print_indent(indention + 1);
+		oputs("Window Location and Size\n");
+	}
+	emit_inch("Left:",   slot->left_off,   L);
+	emit_inch("Top:",    slot->top_off,    T);
+	emit_inch("Width: ", slot->width_off,  W); // note trailing space — matches the runtime writer
+	emit_inch("Height:", slot->height_off, H);
+}
+
+// Decode a Menu Item's WINATTR trailing 5 bytes
+// `<vk> <modifier> 00 00 00` into the canonical
+// `Keyboard Accelerator: <text>` line.
+//
+//   modifier byte:  0x00 = (none)
+//                   0x10 = Shift+
+//                   0x11 = Ctrl+
+//                   0x12 = Alt+
+//                   0x13 = Shift+Ctrl+
+//                   0x14+ = unknown — emitted as `Mod0xNN+`
+//   vk code: standard Windows VK_* values (0x08/BkSp, 0x0d/Enter,
+//            0x21/PgUp, 0x2d/Ins, 0x2e/Del, 0x70-0x7B/F1-F12, ...);
+//            ASCII letters/digits use their ASCII code; unknown VKs
+//            fall back to `VK_0xNN`.
+//
+// Both bytes 0 → emit `(none)`. The runtime writer always emits the line
+// (even `Keyboard Accelerator: (none)`), so we always emit too.
+//
+// Limited to Menu Item (0xa2). Pushbutton / Check Box / Radio Button
+// accelerators are stored elsewhere in their (much larger) WINATTR —
+// different encoding, not currently decoded.
+static const char* vk_name(uint8_t vk, char* tmp, size_t tmp_sz) {
+	switch (vk) {
+	case 0x08: return "BkSp";
+	case 0x09: return "Tab";
+	case 0x0d: return "Enter";
+	case 0x1b: return "Esc";
+	case 0x20: return "Space";
+	case 0x21: return "PgUp";
+	case 0x22: return "PgDn";
+	case 0x23: return "End";
+	case 0x24: return "Home";
+	case 0x25: return "Left";
+	case 0x26: return "Up";
+	case 0x27: return "Right";
+	case 0x28: return "Down";
+	case 0x2d: return "Ins";
+	case 0x2e: return "Del";
+	case 0x6a: return "Multiply";
+	case 0x6b: return "Add";
+	case 0x6d: return "Subtract";
+	case 0x6e: return "Decimal";
+	case 0x6f: return "Divide";
+	case 0x70: return "F1";
+	case 0x71: return "F2";
+	case 0x72: return "F3";
+	case 0x73: return "F4";
+	case 0x74: return "F5";
+	case 0x75: return "F6";
+	case 0x76: return "F7";
+	case 0x77: return "F8";
+	case 0x78: return "F9";
+	case 0x79: return "F10";
+	case 0x7a: return "F11";
+	case 0x7b: return "F12";
+	}
+	if (vk >= '0' && vk <= '9') {
+		tmp[0] = (char)vk; tmp[1] = '\0';
+		return tmp;
+	}
+	if (vk >= 'A' && vk <= 'Z') {
+		tmp[0] = (char)vk; tmp[1] = '\0';
+		return tmp;
+	}
+	if (vk >= 0x60 && vk <= 0x69) {
+		// numpad 0..9 — TD's exact name unverified; "Num0".."Num9" is
+		// a reasonable Microsoft-aligned guess
+		snprintf(tmp, tmp_sz, "Num%u", (unsigned)(vk - 0x60));
+		return tmp;
+	}
+	snprintf(tmp, tmp_sz, "VK_0x%02x", (unsigned)vk);
+	return tmp;
+}
+
+static void print_synth_keyboard_accelerator(class COutline* outline,
+                                             uint64_t item_id,
+                                             uint32_t indention) {
+	if (is_binary_app_output()) return;
+	tagITEM* p_item = outline->get_item(item_id);
+	if (!p_item) return;
+	if (p_item->type != 0x00a2) return; // Menu Item only — see comment above
+	if (p_item->flags & 0x400) return;  // imported — library carries it
+	struct ItemBody* ib = CItem::get_itembody(outline, item_id, 0x14);
+	if (!ib || ib->size < 5) return;
+	const uint8_t* tail = ib->data + (ib->size - 5);
+	uint8_t vk = tail[0];
+	uint8_t mod = tail[1];
+	// Trailing 3 bytes must be zero (sanity check — bail silently otherwise
+	// to avoid emitting bogus accelerators on items whose WINATTR doesn't
+	// follow the trailer convention).
+	if (tail[2] || tail[3] || tail[4]) return;
+	print_indent(indention + 1);
+	oputs("Keyboard Accelerator: ");
+	if (vk == 0 && mod == 0) {
+		oputs("(none)\n");
+		return;
+	}
+	switch (mod) {
+	case 0x00: break;
+	case 0x10: oputs("Shift+"); break;
+	case 0x11: oputs("Ctrl+"); break;
+	case 0x12: oputs("Alt+"); break;
+	case 0x13: oputs("Shift+Ctrl+"); break;
+	default: oprintf("Mod0x%02x+", (unsigned)mod); break;
+	}
+	char tmp[16];
+	oprintf("%s\n", vk_name(vk, tmp, sizeof(tmp)));
+}
+
+void CItem::print_extra_lines(class COutline* outline, uint64_t item_id, uint32_t indention) {
+	// Synthetic pseudo-children that the runtime writer emits but don't
+	// exist as separate items in the binary outline:
+	// 1. `Resource Id: <decimal>` from the RESOURCEID body (if present)
+	// 2. `Title: <text>` and `Status Text: <text>` from raw-string handles
+	//    referenced inside the WINATTR body
+	// 3. `Keyboard Accelerator: <text>` for Menu Items (see helper above)
+	// 4. `Window Location and Size` block (see print_synth_form_geometry)
+	// 5. `.data <NAME> ... .enddata` blocks for any binary-shaped body
+	// Order matches the runtime's own emission order (synthetic-children
+	// first, then .data blocks at column 0). Real children come after via
+	// iterate_items's normal recursion.
+	print_synth_resource_id(outline, item_id, indention);
+	print_synth_winattr_strings(outline, item_id, indention);
+	print_synth_data_type(outline, item_id, indention);
+	print_synth_keyboard_accelerator(outline, item_id, indention);
+	print_synth_form_geometry(outline, item_id, indention);
+	print_data_blocks(outline, item_id);
 }
 
 
@@ -710,6 +1442,80 @@ public:
 	}
 };
 
+// Items whose printable form is "<name> <decimal>" with the decimal coming
+// from a 4-byte numeric item body. cbi -b binds External Function
+// declarations to DLL exports by Export Ordinal when the SAL function name
+// doesn't match the DLL's literal export name. Without the value printed,
+// cbi falls back to name-only resolution and reports "Cannot find function
+// within external library". Same applies to `Resource Id:` for Menu /
+// Menu Item: bodies and other simple-numeric outline rows where text
+// decompile must preserve the value.
+class CNumericItem : public CItem {
+	uint8_t body_type;
+public:
+	CNumericItem(const char* name, uint8_t body_type)
+		: CItem(name), body_type(body_type) {
+	}
+
+	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
+		// Emit the standard "<name>" prefix (and any TEXT/symbol-lookup body
+		// the base class would already handle).
+		CItem::print(outline, item_id, memory_item);
+		// Then append the numeric value if present. Skip in verbose mode —
+		// `print_all_itembodies` already emits it as "INT:0x..." / "ORDINAL:0x..."
+		// and a second copy would duplicate.
+		if (is_verbose()) return;
+		struct ItemBody* ib = get_itembody(outline, item_id, body_type);
+		if (!ib) return;
+		uint32_t v = 0;
+		// item_bodies[].size = 4 for INT (0x02) and ORDINAL (0x22) — the
+		// numeric value sits inline at &item_body->size (same layout
+		// print_all_itembodies uses for 4-byte bodies).
+		memcpy(&v, &ib->size, sizeof(v));
+		// Skip 0 — cbi-c treats blank `Export Ordinal:` as "unset, fall back
+		// to name match", but `Export Ordinal: 0` as "bind to ordinal 0"
+		// (invalid: DLL ordinals start at 1). Sita-emitted External Function
+		// declarations with no explicit ordinal carry a zero-valued body 0x22;
+		// printing it would break name-match resolution everywhere.
+		if (v == 0) return;
+		oprintf(" %u", v);
+	}
+
+	virtual ~CNumericItem() {
+	}
+};
+
+// Items whose printable form is "<name> Yes|No". The runtime writer always
+// emits the Yes/No suffix because the cx step defaults a missing value to
+// the opposite of what the bx step expects for visibility-modifier rows.
+// Affects `Protected Variable:` / `Protected Function:` (LIST body 0x05;
+// non-zero = Yes, zero = No). Without the value, bx falls back to
+// "protected" and external references fail with "Symbol is undefined or
+// unable to be referenced from current location".
+class CYesNoItem : public CItem {
+	uint8_t body_type;
+public:
+	CYesNoItem(const char* name, uint8_t body_type)
+		: CItem(name), body_type(body_type) {
+	}
+
+	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
+		CItem::print(outline, item_id, memory_item);
+		if (is_verbose()) return;
+		struct ItemBody* ib = get_itembody(outline, item_id, body_type);
+		// Body present at all? The runtime always emits one; absent should
+		// not happen on real samples, but if it does, fall back silently
+		// to avoid printing a bogus value.
+		if (!ib) return;
+		uint32_t v = 0;
+		memcpy(&v, &ib->size, sizeof(v));
+		oputs(v ? " Yes" : " No");
+	}
+
+	virtual ~CYesNoItem() {
+	}
+};
+
 uint32_t CItem::get_funcvar_typedef(class COutline* outline, uint64_t item_id) {
 	struct ItemBody* item_body = CItem::get_itembody(outline, item_id, 0x14);
 	if (item_body && item_body->size >= 7) {
@@ -717,7 +1523,10 @@ uint32_t CItem::get_funcvar_typedef(class COutline* outline, uint64_t item_id) {
 #ifndef TDx64
 			return *(uint32_t*)&item_body->data[4];
 #else
-			return *(uint64_t*)&item_body->data[4];
+			// Function returns uint32_t; the 64-bit body field is wider but
+			// only the low 32 bits identify a typedef. Explicit narrowing
+			// silences MSVC C4244.
+			return (uint32_t)*(uint64_t*)&item_body->data[4];
 #endif
 		}
 	}
@@ -730,28 +1539,7 @@ public:
 	CFunctionalVar() : CItem(NULL) {
 	}
 	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
-		bool printed = false;
-		uint64_t typedef_at = get_funcvar_typedef(outline, item_id);
-		if (typedef_at) {
-			const char16_t* name = outline->symbol_lookup(typedef_at);
-			if (!name) {
-				struct ItemBody* itb = get_itembody(outline, typedef_at, 0x01);
-				if (itb) {
-					name = (const char16_t*)itb->data;
-				}
-			}
-			if (name) {
-				print_utf16(name);
-				oputs(":");
-			}else{
-				oprintf("FunctionalVar_0x%08x:",typedef_at);
-			}
-			printed = true;
-		}
-
-		if (!printed) {
-			oputs("FunctionalVar:");
-		}
+		oputs("FunctionalVar:");
 		const char16_t* str = outline->symbol_lookup(item_id);
 		if (!str) {
 			struct ItemBody* itb = get_itembody(outline, item_id, 0x01);
@@ -766,10 +1554,76 @@ public:
 
 		CItem::print_array_boundaries(outline, item_id);
 
+		// CLASS_CONSTRUCTOR (0x37) carries the declaration's initializer hint.
+		// Value 0x0001 corresponds to `= OBJ_Null` (the default-null form seen
+		// in TD samples). Other values likely encode `= new ClassX` but we
+		// don't have a test case — leave those unhandled for now.
+		struct ItemBody* ctor = get_itembody(outline, item_id, 0x37);
+		if (ctor) {
+			uint16_t val = *((uint16_t*)&ctor->size);
+			if (val == 0x0001) {
+				oputs(" = OBJ_Null");
+			}
+		}
+
 		if (is_verbose()) {
 			print_all_itembodies(outline, item_id);
 		}
 	}
+
+	// Emit the SAL `Class: <ClassName>` binding so cbi -b can resolve member
+	// accesses (`var.field`). The class name lives in an auxiliary heap
+	// block of the same OSEG, referenced by WINATTR's bytes [2:4] (uint16
+	// LE handle_id). Without this child line, cbi -c writes a .app whose
+	// FunctionalVar item has WINATTR data[2:4]=0 and no class-name heap
+	// block — cbi -b then fails with "Symbol is undefined" on every member
+	// access.
+	virtual void print_extra_lines(class COutline* outline, uint64_t item_id, uint32_t indention) {
+		struct ItemBody* ib = get_itembody(outline, item_id, 0x14);
+		if (!ib || ib->size < 4) {
+			return;
+		}
+		// data[0:2] is the variable-kind discriminator; only 0x0105 (FunctionalVar)
+		// uses the class-name handle at data[2:4]. Other kinds may overload the slot.
+		if (ib->data[0] != 0x05 || ib->data[1] != 0x01) {
+			return;
+		}
+		uint16_t handle_id = (uint16_t)ib->data[2] | ((uint16_t)ib->data[3] << 8);
+		if (!handle_id) {
+			return;
+		}
+		uint32_t seginf = (uint32_t)(item_id >> ITEM_ID_WIDTH);
+		uint8_t* raw = outline->get_handle_data(seginf, handle_id);
+		if (!raw) {
+			return;
+		}
+		// Heap-block payload: [uint16 length_in_bytes][UTF-16LE chars, possibly
+		// null-terminated][padding to 4-byte boundary].
+		uint16_t length_bytes = (uint16_t)raw[0] | ((uint16_t)raw[1] << 8);
+		if (length_bytes < 2 || (length_bytes & 1)) {
+			return;
+		}
+		const char16_t* name = (const char16_t*)(raw + 2);
+		// Strip a trailing null character (the on-disk string is usually
+		// null-terminated within the length).
+		size_t chars = length_bytes / 2;
+		while (chars > 0 && name[chars - 1] == 0) {
+			chars--;
+		}
+		if (chars == 0) {
+			return;
+		}
+		print_indent(indention + 1);
+		oputs("Class: ");
+		print_utf16(name, chars * 2);
+		oputs("\n");
+		// Also emit any `.data` blocks attached to the FunctionalVar item —
+		// CFunctionalVar overrides print_extra_lines to add the synthetic
+		// Class line, so it must call the base emission path explicitly to
+		// keep .data parity with other items.
+		CItem::print_data_blocks(outline, item_id);
+	}
+
 	virtual ~CFunctionalVar() {
 	}
 };
@@ -808,7 +1662,9 @@ public:
 						this->expected_datatype,
 						varscope::NONE,
 						0xff,
-						NULL
+						NULL,
+						NULL,
+						0,  // caller_arg_count: not in call context here
 				};
 				decompile_expression(di);
 			}
@@ -870,7 +1726,6 @@ public:
 				if (item_p->type == Item::Type::LOOP) {
 					uint64_t loop_id = outline->get_item_loop_info(item_ref);
 					if (loop_id) {
-						// TODO: determine whether the loop is the nearest break-out-item so that no label may be needed - only set additional item info if this is not the case
 						oprintf(" loop_%u",loop_id);
 					}
 				}
@@ -887,9 +1742,6 @@ public:
 			tagITEM* item_p = outline->get_item(item_ref);
 			if (item_p) {
 				if (item_p->type == Item::Type::LOOP) {
-					// TODO: determine whether the loop is the nearest break-out-item
-					// so that no label may be needed - only set additional item info
-					// if this is not the case
 					outline->set_item_loop_info(item_ref, 1);
 				}
 			}
@@ -931,7 +1783,7 @@ public:
 class CVar : public CItem {
 protected:
 	void decompile_helper(class COutline* outline, uint64_t item_id,const char16_t* assigned_value) {
-		if (get_app_output_filename() && !get_itembody(outline, item_id, 0x01)) {
+		if (is_binary_app_output() && !get_itembody(outline, item_id, 0x01)) {
 
 			const char16_t* str = outline->symbol_lookup(item_id);
 			if (str) {
@@ -943,15 +1795,45 @@ protected:
 						assign_len = 6 + strlen_utf16(assigned_value);
 					}
 
-					struct ItemBody* out = alloc<struct ItemBody*>(sizeof(struct ItemBody)+len+assign_len);
+					// Array variables: source-form `.app` stores the array-
+					// ness as a suffix in the name string itself
+					// (`dArray[*]`, `nMatrix[10,5]`, …) — NOT in the runtime
+					// ARRAYBOUNDS / MDARRAYBOUNDS bodies (those are
+					// recomputed at compile time by cbi -b). When Sita reads
+					// a `.exe`, it sees the runtime bodies but the symbol's
+					// stored name lacks the suffix. Without appending the
+					// suffix here, the resulting `.app` rebuilds but cbi -b
+					// then errors out with "Array variable expected" /
+					// "Window handle variable or array required" for every
+					// reference to the variable — it doesn't know the
+					// variable is an array because no `[...]` is in the
+					// name.
+					char arr_buf[128];
+					size_t arr_n = format_array_suffix(outline, item_id, arr_buf, sizeof(arr_buf));
+					size_t arr_utf16 = arr_n * 2; // ASCII → UTF-16LE: each char becomes 2 bytes
+
+					struct ItemBody* out = alloc<struct ItemBody*>(sizeof(struct ItemBody)+len+arr_utf16+assign_len);
 					out->type = 0x01;
-					out->size = (uint16_t)(len + assign_len);
+					out->size = (uint16_t)(len + arr_utf16 + assign_len);
 					memcpy(out->data,str,len);
+
+					if (arr_n) {
+						// Insert array suffix right before the existing
+						// trailing NUL (positions [len-2, len-1] are the
+						// original NUL pair). Shift NUL to after the suffix.
+						uint8_t* p = out->data + len - 2;
+						for (size_t i = 0; i < arr_n; i++) {
+							*p++ = (uint8_t)arr_buf[i];
+							*p++ = 0;
+						}
+						*p++ = 0;
+						*p = 0;
+					}
 
 					if (assign_len) {
 						char16_t equals[3] = {' ','=',' '};
-						memcpy(out->data+len-2,equals,6);
-						memcpy(out->data+len+4,assigned_value,assign_len-4);
+						memcpy(out->data+len+arr_utf16-2,equals,6);
+						memcpy(out->data+len+arr_utf16+4,assigned_value,assign_len-4);
 					}
 
 					add_itembody(outline, item_id, out);
@@ -962,7 +1844,7 @@ protected:
 	}
 
 	void decompile_number(class COutline* outline, uint64_t item_id, void (*sprint_num)(char*,const struct SalNumber*)){
-		if (get_app_output_filename() && !get_itembody(outline, item_id, 0x01)) {
+		if (is_binary_app_output() && !get_itembody(outline, item_id, 0x01)) {
 			char buf[300];
 			*buf = 0;
 			struct ItemBody* item_body = get_itembody(outline, item_id, 0x2e);
@@ -1014,6 +1896,7 @@ public:
 
 	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		CItem::print(outline, item_id, memory_item);
+		CItem::print_array_boundaries(outline, item_id);
 
 		struct ItemBody* item_body = get_itembody(outline, item_id, 0x2e);
 		if (item_body) {
@@ -1023,7 +1906,7 @@ public:
 	}
 
 	virtual void decompile(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
-		if (get_app_output_filename() && !get_itembody(outline, item_id, 0x01)) {
+		if (is_binary_app_output() && !get_itembody(outline, item_id, 0x01)) {
 			decompile_number(outline, item_id, sprint_number);
 		}
 	}
@@ -1042,6 +1925,7 @@ public:
 
 	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		CItem::print(outline, item_id, memory_item);
+		CItem::print_array_boundaries(outline, item_id);
 
 		struct ItemBody* item_body = get_itembody(outline, item_id, 0x2e);
 		if (item_body) {
@@ -1051,7 +1935,7 @@ public:
 	}
 
 	virtual void decompile(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
-		if (get_app_output_filename() && !get_itembody(outline, item_id, 0x01)) {
+		if (is_binary_app_output() && !get_itembody(outline, item_id, 0x01)) {
 			decompile_number(outline, item_id, sprint_date);
 		}
 	}
@@ -1070,6 +1954,7 @@ public:
 
 	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		CItem::print(outline, item_id, memory_item);
+		CItem::print_array_boundaries(outline, item_id);
 
 		struct ItemBody* item_body = get_itembody(outline, item_id, 0x2e);
 		if (item_body) {
@@ -1078,7 +1963,7 @@ public:
 	}
 
 	virtual void decompile(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
-		if (get_app_output_filename() && !get_itembody(outline, item_id, 0x01)) {
+		if (is_binary_app_output() && !get_itembody(outline, item_id, 0x01)) {
 			decompile_number(outline, item_id, sprint_bool);
 		}
 	}
@@ -1097,6 +1982,7 @@ public:
 
 	virtual void print(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
 		CItem::print(outline, item_id, memory_item);
+		CItem::print_array_boundaries(outline, item_id);
 
 		struct ItemBody* item_body = get_itembody(outline, item_id, 0x2e);
 		if (item_body) {
@@ -1111,7 +1997,7 @@ public:
 	}
 
 	virtual void decompile(class COutline* outline, uint64_t item_id, uint64_t* memory_item){
-		if (get_app_output_filename() && !get_itembody(outline, item_id, 0x01)) {
+		if (is_binary_app_output() && !get_itembody(outline, item_id, 0x01)) {
 			const struct String* str = NULL;
 			struct ItemBody* item_body = get_itembody(outline, item_id, 0x2e);
 			if (item_body) {
@@ -1148,7 +2034,24 @@ public:
 };
 
 const struct MatchItemsToScope CCON[] = {
-		// {varscope::INTERNAL_FUNCTION_PARAM,0x89}, // Parameters [intern function] // TODO: "Parameters" item may have an offset... --> handle is somehow??
+		// `On <event>` handlers carry their own Parameters block (e.g.
+		// `wParam` / `lParam`, or COM event args like
+		// `On evRecordRetrieved(strName, strStreet, …)`). Bytecode
+		// references them with var_scope = INTERNAL_FUNCTION_PARAM (0x02).
+		// Without this registration the access prints as `sc02_var0000`
+		// etc.
+		{varscope::INTERNAL_FUNCTION_PARAM, 0x89}, // Parameters
+		{varscope::NONE, 0x00}};
+
+const struct MatchItemsToScope CTHREADEVENT[] = {
+		// `Thread Events` per-event handlers (`Thread Start`,
+		// `Thread Before Start`, `Thread Report Progress`, `Thread Finished`,
+		// `Thread Report Error`) inside a `BackgroundWorkerVar:` carry an
+		// `Event Parameters` (0x2df) subblock with the event-specific
+		// parameter declarations (e.g. `Number: nProgress, String: strProgress`
+		// for Thread Report Progress). Bytecode references them with
+		// var_scope = INTERNAL_FUNCTION_PARAM (0x02), same as `On <event>`.
+		{varscope::INTERNAL_FUNCTION_PARAM, Item::Type::EVENT_PARAMETERS},
 		{varscope::NONE, 0x00}};
 
 class COn : public CVarScope {
@@ -1167,7 +2070,9 @@ public:
 		if (item_body) {
 			oputs(" ");
 			if (!get_event_name(item_body)) {
-				oprintf("%u",*((uint32_t*)&item_body->size));
+				uint32_t v;
+				memcpy(&v, &item_body->size, sizeof(v));
+				oprintf("%u",v);
 			}else{
 				oputs(get_event_name(item_body));
 			}
@@ -1177,13 +2082,15 @@ public:
 	}
 
 	void decompile(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
-		if (get_app_output_filename()) {
+		if (is_binary_app_output()) {
 			// replace 0x2f itembody by string itembody
 			struct ItemBody* item_body = get_itembody(outline, item_id, 0x2f);
 			if (item_body) {
 				if (!get_event_name(item_body)) {
 					char tmp[30];
-					sprintf(tmp,"%u",*((uint32_t*)&item_body->size));
+					uint32_t v;
+					memcpy(&v, &item_body->size, sizeof(v));
+					sprintf(tmp,"%u",v);
 					itembody_add_string(outline, item_id, tmp);
 				}else{
 					itembody_add_string(outline, item_id, get_event_name(item_body));
@@ -1209,6 +2116,20 @@ private:
 				0
 		};
 		outline->find_children_of_type_and_run(callback1, &item, item, type, false);
+		// Function-static variables (`Static Variables` block inside each
+		// Function: of the class) live in the same class-static memory
+		// region as Class Variables, accessed by the bytecode via
+		// sc=0x0f (STATIC_CLASS_VAR) using the enclosing class's HANDLE +
+		// the var's VAROFFSET. To resolve the same way for read/write
+		// sites, walk every Function of the class and register each
+		// Static Variable child under (class_item, STATIC_CLASS_VAR,
+		// var_offset) — same registration shape as CLASS_VARIABLES, just
+		// sourced from a deeper subtree. METHODS = 0x117 (rendered as
+		// "Functions" in SAL) is the container holding the class's
+		// Function: items as NULL-ITEMCLONE children that dereference to
+		// the actual Function items in another segment.
+		uint16_t methods_type[] = { Item::Type::METHODS, 0 };
+		outline->find_children_of_type_and_run(callback_methods, &item, item, methods_type, false);
 	}
 
 	static void callback1(class COutline* outline, uint64_t item, void* param) {
@@ -1216,6 +2137,19 @@ private:
 	}
 	static void callback2(class COutline* outline, uint64_t item, void* param) {
 		addvar(outline, *(uint64_t*)param, varscope::STATIC_CLASS_VAR, item);
+	}
+
+	// Walk the METHODS container's children (Functions). For each Function,
+	// walk its Static Variables block and register each variable as
+	// STATIC_CLASS_VAR of the enclosing class. `param` carries the class
+	// item id (same as callback1/2's param convention).
+	static void callback_methods(class COutline* outline, uint64_t methods_item, void* param) {
+		uint16_t fn_type[] = { Item::Type::INT_FUNCTION, 0 };
+		outline->find_children_of_type_and_run(callback_fn, param, methods_item, fn_type, false);
+	}
+	static void callback_fn(class COutline* outline, uint64_t fn_item, void* param) {
+		uint16_t sv_type[] = { Item::Type::STATIC_VARIABLES, 0 };
+		outline->find_children_of_type_and_run(callback1, param, fn_item, sv_type, false);
 	}
 
 public:
@@ -1339,17 +2273,54 @@ void CClass::callback4(class COutline* outline, uint64_t item, void* param) {
 }
 
 
-CClass::CClass(const char* str) : CVarScope(str, CCLASS_TYPES) {
+CClass::CClass(const char* str) : CVarScope(str, CCLASS_TYPES), target_control_type(0) {
+	// Pre-compute the matching control-instance type for this class
+	// registration so first_pass can register it for synthetic
+	// `Class: <name>` emission. e.g. "Data Field Class:" → 0x04 (the
+	// tag_items index of "Data Field:"). The lookup runs once per
+	// registration (constructor time) — TAG_ITEMS_AMOUNT scans is fine.
+	if (!str) return;
+	const char* suffix = " Class:";
+	size_t name_len = strlen(str);
+	size_t suffix_len = strlen(suffix);
+	if (name_len <= suffix_len || strcmp(str + name_len - suffix_len, suffix) != 0) {
+		return;
+	}
+	// Build control name = name without " Class" but keeping ":".
+	// "Data Field Class:" → "Data Field:".
+	char target_name[128];
+	if (name_len - suffix_len + 1 >= sizeof(target_name)) return;
+	memcpy(target_name, str, name_len - suffix_len);
+	target_name[name_len - suffix_len] = ':';
+	target_name[name_len - suffix_len + 1] = '\0';
+	for (uint16_t i = 0; i < TAG_ITEMS_AMOUNT; i++) {
+		if (!tag_items[i]) continue;
+		const char* candidate = tag_items[i]->get_name();
+		if (candidate && strcmp(candidate, target_name) == 0) {
+			target_control_type = i;
+			break;
+		}
+	}
 }
 
 void CClass::first_pass(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	uint16_t type[] = {
-			Item::Type::DERIVED_FROM, //// TODO: there exist three different "Derived From:" items, e.g. one for interfaces... --> TODO: build app that uses them and watch instance variable access
+			Item::Type::DERIVED_FROM,
 			Item::Type::DERIVED_FROM_INTERFACE,
 			0
 	};
 	outline->find_children_of_type_and_run(callback3, &item_id, item_id, type);
 	CVarScope::first_pass(outline, item_id, memory_item);
+	// Register this class definition as the binding for control instances
+	// of the matching type. If multiple classes of the same type are
+	// declared, the first declared wins. Imported classes (bit 0x400) are
+	// skipped — main-app classes shadow library-provided ones.
+	if (target_control_type) {
+		tagITEM* p_item = outline->get_item(item_id);
+		if (p_item && !(p_item->flags & 0x400)) {
+			outline->register_class_for_control_type(target_control_type, item_id);
+		}
+	}
 }
 
 void CClass::preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
@@ -1372,7 +2343,7 @@ uint64_t CObject::get_class(class COutline* outline, uint64_t item_id) {
 	}
 	uint16_t type = *((uint16_t*)ib->data); // should match item->type value!!
 	uint32_t offset = 0;
-	switch (type) { // FIXME adapt to 64bit apps!
+	switch (type) { // adapt to 64bit apps!
 	case 0x01: // Form Window
 		offset = 0x04; // may depend on version of Team Developer
 		break;
@@ -1380,9 +2351,9 @@ uint64_t CObject::get_class(class COutline* outline, uint64_t item_id) {
 		offset = 0x10; // may depend on version of Team Developer
 		break;
 	default:
-		offset = 0x10; // FIXME: THIS IS NOT CORRECT!!!!! other types are missing
+		offset = 0x10; // not correct for all types
 	}
-	if (ib->size < offset + sizeof(uint32_t)) { // FIXME adapt to 64bit apps!
+	if (ib->size < offset + sizeof(uint32_t)) { // adapt to 64bit apps!
 		return 0;
 	}
 	uint64_t class_type = 0;
@@ -1414,7 +2385,7 @@ void CObject::first_pass(class COutline* outline, uint64_t item_id, uint64_t* me
 }
 
 void CObject::preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
-	uint32_t it_class = get_class(outline, item_id);
+	uint64_t it_class = get_class(outline, item_id);
 	if (!it_class) {
 		return;
 	}
@@ -1422,31 +2393,36 @@ void CObject::preprocess(class COutline* outline, uint64_t item_id, uint64_t* me
 }
 
 void CObject::print(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
-	uint32_t it_class = get_class(outline, item_id);
-	if (!it_class) {
-		CClass::print(outline, item_id, memory_item);
-		return;
-	}
-	const char16_t* class_name = outline->symbol_lookup(it_class);
-	if (!class_name) {
-		CClass::print(outline, item_id, memory_item);
-		return;
-	}
-	print_utf16(class_name);
-	oputs(": ");
-	const char16_t* str = outline->symbol_lookup(item_id);
-	if (str) {
-		print_utf16(str);
-	}else{
-		struct ItemBody* item_body = get_itembody(outline, item_id, 0x01);
-		if (item_body) {
-			print_utf16((const char16_t*)item_body->data, item_body->size);
+	// Always emit the generic control/object type label (this->name), never
+	// substitute the user-defined subclass name. Matches TD GUI convention:
+	// `Form Window: frm1`, not `frmCls: frm1`. The subclass relationship is
+	// recoverable from the item's class metadata elsewhere in the output.
+	CClass::print(outline, item_id, memory_item);
+}
+
+void CObject::print_extra_lines(class COutline* outline, uint64_t item_id, uint32_t indention) {
+	// Emit synthetic `Class: <name>` for control instances of types that
+	// have a registered class definition in the outline. Gives cbi -b the
+	// class binding it needs to resolve `obj.member` external references.
+	// Skip in binary output mode (the .app reconstruction doesn't need a
+	// synthetic child) and skip imported items (the library carries the
+	// binding via 0x400 flag).
+	if (!is_binary_app_output()) {
+		tagITEM* p_item = outline->get_item(item_id);
+		if (p_item && !(p_item->flags & 0x400)) {
+			uint64_t class_def = outline->get_default_class_for_control_type(p_item->type);
+			if (class_def) {
+				const char16_t* class_name = outline->symbol_lookup(class_def);
+				if (class_name) {
+					print_indent(indention + 1);
+					oputs("Class: ");
+					print_utf16(class_name, strlen_utf16(class_name));
+					oputs("\n");
+				}
+			}
 		}
 	}
-
-	if (is_verbose()) {
-		print_all_itembodies(outline,item_id);
-	}
+	CItem::print_extra_lines(outline, item_id, indention);
 }
 
 CObject::~CObject() {
@@ -1480,10 +2456,39 @@ void CDlg::callback0(class COutline* outline, uint64_t item, void* param) {
 
 void CDlg::first_pass(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	CObject::first_pass(outline, item_id, memory_item);
+	// Derived From: register the parent class's pointer into this item's
+	// CURRENT_OBJECT scope so the cascade walks into the parent's Instance
+	// Variables. CClass::first_pass does this for plain class tags, but CDlg
+	// (used for `Dialog Box Class:` / `Form Window Class:` templates)
+	// overrides first_pass and used to skip the Derived From walk — that left
+	// inherited Instance Variables unreachable via sc07 (e.g. wizwiz's
+	// cWizardFrame inheriting `Items[*]` from cFormPageList).
+	{
+		uint16_t type[] = {
+				Item::Type::DERIVED_FROM,
+				Item::Type::DERIVED_FROM_INTERFACE,
+				0};
+		outline->find_children_of_type_and_run(CClass::callback3, &item_id, item_id, type);
+	}
 	const struct MatchItemsToScope scope[] = {
 			{varscope::CURRENT_FORM, 0x0076},
 			{varscope::CURRENT_FORM, 0x0191},
 			{varscope::CURRENT_FORM, 0x0072},
+			// `Background Threads:` (BACKGROUND_THREADS = 0x2e4) is a
+			// form-level container introduced in TD 7.1 holding
+			// `BackgroundWorkerVar:` instances (typed handles for
+			// SalBackgroundWorker* APIs). They live in the form's
+			// CURRENT_FORM variable storage — without this walk, calls
+			// like `Call SalBackgroundWorkerStart(<var>)` decompile as
+			// `SalBackgroundWorkerStart(sc04_var0000)`.
+			{varscope::CURRENT_FORM, Item::Type::BACKGROUND_THREADS},
+			// CDlg is used for both form-instance and class-template items
+			// (Form Window Class / Dialog Box Class). Templates may carry
+			// Instance Variables (type 0x109) that must register as
+			// CURRENT_OBJECT so derived instances can resolve them via the
+			// offset-0 class-pointer cascade. Harmless for plain instances —
+			// they just don't have INSTANCE_VARIABLES children.
+			{varscope::CURRENT_OBJECT, Item::Type::INSTANCE_VARIABLES},
 			{varscope::NONE, 0x00}};
 	CVarScope vc(NULL, scope);
 	vc.first_pass(outline, item_id, memory_item);
@@ -1506,6 +2511,25 @@ void CDlg::first_pass(class COutline* outline, uint64_t item_id, uint64_t* memor
 void CDlg::preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
 	CObject::preprocess(outline, item_id, memory_item);
 	memory_item[varscope::CURRENT_FORM] = item_id;
+	// CDlg is also the tag for `Form Window Class:` / `Dialog Box Class:`
+	// templates. Their Instance Variables (0x109) are registered on the
+	// template itself at CURRENT_OBJECT scope (by CDlg::first_pass, Zb), so
+	// a method body inside the template needs CURRENT_OBJECT pointed at the
+	// template to resolve `sc07_var...` references against those vars.
+	// Detect the template case by checking if the item has any
+	// CURRENT_OBJECT-scope memory registered — only templates do, plain
+	// instances don't.
+	if (outline->has_any_variable(item_id, varscope::CURRENT_OBJECT)) {
+		memory_item[varscope::CURRENT_OBJECT] = item_id;
+		// CURRENT_FORM_CLASS (0x09) — bytecode references Instance Variables
+		// of a `Form Window Class:` / `Dialog Box Class:` template via this
+		// scope when the access compiles from a control's message-action body
+		// nested inside the class (rather than a method body of the class
+		// itself). The vars are already registered at CURRENT_OBJECT scope;
+		// pointing memory_item[0x09] at the same template lets lookup walk
+		// the same map (with a CURRENT_OBJECT fallback in print_var_name).
+		memory_item[varscope::CURRENT_FORM_CLASS] = item_id;
+	}
 	cur_dlg_item.push(item_id);
 }
 
@@ -1520,12 +2544,88 @@ void CDlg::postprocess(class COutline* outline, uint64_t item_id, uint64_t* memo
 CDlg::~CDlg() {
 }
 
+CDlgParent::CDlgParent(const char* str) : CObject(str) {
+}
+
+void CDlgParent::first_pass(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
+	CObject::first_pass(outline, item_id, memory_item);
+	// Register instance vars declared inside this container's "Window Variables"
+	// (0x76) section at CURRENT_OBJECT scope of the container. Child Grid /
+	// Child Table instances can carry their own local variables just like a
+	// Form Window — without this, the vars never register and their bytecode
+	// references mis-resolve to the container itself.
+	const struct MatchItemsToScope scope[] = {
+		{varscope::CURRENT_OBJECT, 0x0076},
+		{varscope::CURRENT_OBJECT, 0x0191},
+		{varscope::CURRENT_OBJECT, 0x0072},
+		{varscope::NONE, 0x00}};
+	CVarScope vc(NULL, scope);
+	vc.first_pass(outline, item_id, memory_item);
+	// A Child Table / Child Grid that derives its behaviour from a class
+	// with Instance Variables accesses the inherited member via scope=0x07
+	// (CURRENT_OBJECT). CDlgParent::preprocess sets memory_item[CURRENT_OBJECT]
+	// = item_id (the instance), but the instance carries no CURRENT_OBJECT
+	// entry, so the cascade to the parent class never starts and the access
+	// leaks as `sc07_var00aa`.
+	//
+	// Mirror CDlg::first_pass for the CURRENT_OBJECT case: register the
+	// class pointer at offset 0 of the instance's CURRENT_OBJECT scope so
+	// lookup_variable(instance, CURRENT_OBJECT, off) walks back to off=0,
+	// finds the class, then cascades through the class's own CURRENT_OBJECT
+	// (DERIVED_FROM-registered class chain via callback4) into the parent
+	// class where the variable lives.
+	uint64_t object_class = CObject::get_class(outline, item_id);
+	if (object_class && outline->has_any_variable(object_class, varscope::CURRENT_OBJECT)) {
+		outline->add_variable(item_id, varscope::CURRENT_OBJECT, 0, object_class);
+	}
+
+	// High-offset Child-Table member access: Child Table / Child Grid
+	// columns live in `CHILD_GRID_CONTENTS` (0xd3) and carry FORM-RELATIVE
+	// VAROFFSETs. Bytecode like `Set <col>.<member> = <value>` compiles
+	// to a single sc04 access at offset = column_form_offset +
+	// member_offset_in_class. The existing CDlg-level Contents walk
+	// (form's 0x072) doesn't recurse into Child Tables; CDlgParent's
+	// CURRENT_OBJECT walk only includes 0x0072 (Tab Bar Contents) and
+	// skips 0xd3, so columns never reach addvar.
+	//
+	// Walk CHILD_GRID_CONTENTS at the form's CURRENT_FORM scope (the form
+	// id is `cur_dlg_item.top()` here — CDlgParent has not yet pushed
+	// itself onto the stack). addvar's class-object branch then registers
+	// each column at form.CURRENT_FORM[VAROFFSET] and column.CURRENT_FORM[0]
+	// = its class, so the 4-way cascade in lookup_variable resolves a
+	// member access through the column's class CURRENT_OBJECT scope.
+	if (!CDlg::cur_dlg_item.empty()) {
+		static const varscope kCurrentForm = varscope::CURRENT_FORM;
+		static const uint16_t kContentsTypes[] = { Item::Type::CHILD_GRID_CONTENTS, 0 };
+		uint64_t form_id = CDlg::cur_dlg_item.top();
+		struct CVarScope::Params p = {kContentsTypes, &kCurrentForm, &form_id};
+		outline->find_children_of_type_and_run(CVarScope::callback1, &p, item_id, kContentsTypes);
+	}
+
+	CDlg::cur_dlg_item.push(item_id);
+}
+
+void CDlgParent::preprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
+	CObject::preprocess(outline, item_id, memory_item);
+	memory_item[varscope::CURRENT_OBJECT] = item_id;
+	CDlg::cur_dlg_item.push(item_id);
+}
+
+void CDlgParent::postprocess(class COutline* outline, uint64_t item_id, uint64_t* memory_item) {
+	if (!CDlg::cur_dlg_item.empty() && CDlg::cur_dlg_item.top() == item_id) {
+		CDlg::cur_dlg_item.pop();
+	}
+}
+
+CDlgParent::~CDlgParent() {
+}
+
 
 CItem* tag_items[TAG_ITEMS_AMOUNT] = {
 		new CItem(NULL),
 		new CDlg("Form Window:"),
 		new CDlg("Table Window:"),
-		new CObject("Child Table:"),
+		new CDlgParent("Child Table:"),
 		new CObject("Data Field:"),
 		new CObject("Multiline Field:"),
 		new CObject("Pushbutton:"),
@@ -1599,7 +2699,7 @@ CItem* tag_items[TAG_ITEMS_AMOUNT] = {
 		new CStatement("Enabled when:", datatype::_BOOLEAN),
 		new CItem("End X: "),
 		new CItem("End Y: "),
-		new CItem("Export Ordinal:"),
+		new CNumericItem("Export Ordinal:", 0x22),
 		new CVar("Boolean:"),
 		new CVar("Date/Time:"),
 		new CVar("File Handle:"),
@@ -1712,7 +2812,12 @@ CItem* tag_items[TAG_ITEMS_AMOUNT] = {
 		new CItem("Radio Button"),
 		new CItem("!"),
 		new CItem("Resizable?"),
-		new CStatement("Return"),
+		// Return's default datatype is _BOOLEAN so that a bare `Return 0` /
+		// `Return 1` in SAM_Validate and similar event handlers decompiles
+		// to `Return FALSE` / `Return TRUE`. The _BOOLEAN branch in Const
+		// falls back to a numeric print for non-0/1 values, so `Return 42`
+		// in a Number-returning internal function still prints correctly.
+		new CStatement("Return", datatype::_BOOLEAN),
 		new CItem("Receive Boolean:"),
 		new CItem("Receive Date/Time:"),
 		new CItem("Receive File Handle:"),
@@ -2087,7 +3192,7 @@ CItem* tag_items[TAG_ITEMS_AMOUNT] = {
 		new CItem("Read Only?"),
 		new CItem("Disabled?"),
 		new CItem("Date Time Picker"),
-		new CObject("Child Grid:"),
+		new CDlgParent("Child Grid:"),
 		new CClass("Child Grid Class:"),
 		new CItem("Child Grid:"),
 		new CItem("Display Settings"),
@@ -2258,20 +3363,23 @@ CItem* tag_items[TAG_ITEMS_AMOUNT] = {
 		new CItem("Persist Child Menus?"),
 		new CItem("Allow Text Filter:"),
 		new CItem("Event Parameters"),
-		new CItem("Thread Start"),
-		new CItem("Thread Before Start"),
-		new CItem("Thread Report Progress"),
-		new CItem("Thread Finished"),
+		new CVarScope("Thread Start", CTHREADEVENT),
+		new CVarScope("Thread Before Start", CTHREADEVENT),
+		new CVarScope("Thread Report Progress", CTHREADEVENT),
+		new CVarScope("Thread Finished", CTHREADEVENT),
 		new CItem("Background Threads:"),
 		new CItem("Thread Events"),
 		new CClass("Background Worker Class:"),
 		new CItem("BackgroundWorkerVar:"),
-		new CItem("Protected Variable:"),
-		new CItem("Protected Function:"),
+		// LIST body 0x05; non-zero = Yes, zero = No. The runtime always
+		// emits the value — missing it makes cbi -b default to Protected
+		// and breaks external `obj.member` references.
+		new CYesNoItem("Protected Variable:", 0x05),
+		new CYesNoItem("Protected Function:", 0x05),
 		new CItem("Show Percent:"),
 		new CItem("IME Mode:"),
 		new CItem("Dynalink Grid Window:"),
-		new CItem("Thread Report Error"),
+		new CVarScope("Thread Report Error", CTHREADEVENT),
 		new CItem("Always Show Drop Button?"),
 		new CItem("MDI Tabs:"),
 		new CItem("Anchoring Enabled?"),

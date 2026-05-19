@@ -17,19 +17,42 @@
  * <https://www.gnu.org/licenses/>.
  */
 
-#ifndef COMMANDLINE_ARGS_HPP_
-#define COMMANDLINE_ARGS_HPP_
-#include <stdio.h>
 
-void print_usage(const char* command);
-bool parse_command_line(int argc, char** argv);
-
-bool is_verbose();
-void set_verbose(bool verbose);
-bool is_remove_importflag();
-const char* get_input_filename();
-const char* get_item_dump_dir();
-const char* get_resource_dump_dir();
-const char* get_app_output_filename();
-
-#endif
+#undef  tagPERMSYM
+#undef  StringTable
+#undef  tagITEM
+#undef  tagOSEG
+#undef  HandTable
+#undef  SymbolHash
+#undef  HItem
+#undef  tagHEAPBLK
+#undef  Outline
+#undef  COutline
+#undef  Item
+#undef  CItem
+#undef  CVar
+#undef  CVarScope
+#undef  CGlobalDecs
+#undef  CClass
+#undef  CObject
+#undef  CDlg
+#undef  CDlgParent
+#undef  CCase
+#undef  COn
+#undef  CStatement
+#undef  CString
+#undef  CBoolean
+#undef  CDateTime
+#undef  CNumber
+#undef  CFunctionalVar
+#undef  COutlineVersion
+#undef  CClassDefinitions
+#undef  CLoop
+#undef  CBreak
+#undef  tag_items
+#undef  item_bodies
+#undef  DecompileInfo
+#undef  DispatchFunction
+#undef  tagEXFUNINFO
+#undef  tagINTFUNHITEMS
+#undef  tagRESNAME

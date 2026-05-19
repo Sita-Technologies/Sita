@@ -17,7 +17,6 @@
  * <https://www.gnu.org/licenses/>.
  */
 
-#define _CRT_SECURE_NO_WARNINGS
 
 #include "COutline.hpp"
 #include "process_outline.hpp"
@@ -44,38 +43,7 @@
 
 #include "undef64.inc"
 
-// alpha version
-// TODO: improve support for 64bit apps
-// TODO: complete DispatchFunction
-// TODO: foreach-Statement of TD7.4: what about the CODE itembody? do we need it? how to use labels??
-// TODO: Sal-Functions (like SalMessageBox etc.): expected datatypes of parameters, return value datatype
-// TODO: ext-fun-calls: dynamic calls as well as expected datatypes of parameters
-// TODO: improve support of variable scopes: 0x02 (On ...), 0x04 (item.cpp: support more types in CObject::get_class), 0x08 (this scope fails sometimes)
-// TODO: find out in which cases these var scopes are used and support them: 0x06, 0x09, 0x0a, 0x0b, 0x0d (what about scope 0x0c? does it even exist?)
-// TODO: handle empty object-references in PutCheck, GetCheck, PutString, ..... --> direct reference to object containing the command???
-// TODO: item.cpp:CObject::get_class: play around with different object/class types since structure WINATTR is not understood yet
-// TODO: line-number in tagITEM-flag: deal with overflows ;; how to deal with MAC or LINUX linebreaks?
-// TODO: external functions: datatypes (LPLONG, TEMPLATE, ...)
-// TODO: check hstringtable compression type == 0x3; try to force TD to abstain from compression for specific test exe file -- if successful, test with this file
-// TODO: work on FIXMEs in all source files
-
-// beta version
-// TODO: analyze Object Nationalizer string language/translation table
-// TODO: try to detect Sal Constants (like e.g. MB_OK in SalMessageBox calls) and replace Numbers by these constants
-// TODO: WM_-constants: compare with dumped constants
-// TODO: extract apl-files as separate files
-// TODO: fix resource dumping;; output .app file, .apl files, and resources into one folder
-
-// release version
-// TODO: remove -v commandline flag
-// TODO: const string --> replace later occuring string references by name of const variable?
-// TODO: display all relevant item-body-elements, e.g. "Window Default" settings or "Design-time Settings"
-// TODO: item body: attributes/properties [WINATTR]
-// TODO: sanity: detect and quit infinite loops when processing next_sibling, child, and item pointers.
-// TODO: work on TODOs in all source files
-// TODO: check exception handling, work on memory alloc and free
-
-#define SITA_VERSION "0.1-alpha_pre3"
+#define SITA_VERSION "0.9"
 
 void create_dir_if_not_exists(const char* dirname) {
 	if (!dirname) {
@@ -106,7 +74,9 @@ void create_dir_if_not_exists(const char* dirname) {
 }
 
 int main(int argc, char** argv) {
-	puts("opensource Sita Team Decompiler " SITA_VERSION "\n");
+	// Banner goes to stderr so stdout stays a valid `.apt` text stream
+	// (UTF-8/LF, .head-prefixed).
+	fprintf(stderr,"opensource Sita Team Decompiler " SITA_VERSION "\n\n");
 
 	if (!parse_command_line(argc, argv)) {
 		print_usage(argc>0?*argv:"Sita");
@@ -127,11 +97,26 @@ int main(int argc, char** argv) {
 
 	create_dir_if_not_exists(get_item_dump_dir());
 	create_dir_if_not_exists(get_resource_dump_dir());
+	create_dir_if_not_exists(get_project_dir());
 
+	// For -t, buffer output in memory then convert UTF-8/LF → UTF-16LE+BOM+CRLF
+	// at the end (the encoding `cbi -c` expects). Without -t we stream UTF-8/LF
+	// directly to stdout.
+	char* apt_buf = NULL;
 	struct outstream out;
 	out.buf = NULL;
 	out.f = stdout;
 	out.pos = 0;
+	if (get_apt_output_filename()) {
+		apt_buf = (char*)malloc(1);
+		if (!apt_buf) {
+			fprintf(stderr,"cannot allocate output buffer\n");
+			return 1;
+		}
+		apt_buf[0] = 0;
+		out.f = NULL;
+		out.buf = &apt_buf;
+	}
 	oset(out);
 
 	COutline outline(td);
@@ -140,18 +125,31 @@ int main(int argc, char** argv) {
 		fprintf(stderr,"error: binaries created with TD before version 5.1 are not supported\n");
 		exit(1); // versions before TD 5.1 not supported
 	}
+
+	int rc = 1;
 	if (outline.get_file_hdr().flags & FLAG_IS_64BIT) {
 		if (outline.get_file_hdr().version < VERSION_TD70) {
 			fprintf(stderr,"error: 64bit flag set for binary created with TD before version 7.0\n");
 			exit(1);
 		}
 		// load as 64bit binary
-		COutline64 outline(td);
+		COutline64 outline64(td);
 		init_system_vars64();
-		return process_outline(outline)?0:1;
+		rc = process_outline(outline64) ? 0 : 1;
+	} else {
+		// process 32bit binary
+		init_system_vars();
+		rc = process_outline(outline) ? 0 : 1;
 	}
 
-	// process 32bit binary
-	init_system_vars();
-	return process_outline(outline)?0:1;
+	if (apt_buf) {
+		if (rc == 0 && get_apt_output_filename()) {
+			if (!write_utf16_apt(get_apt_output_filename(), apt_buf)) {
+				fprintf(stderr,"cannot write to apt file %s\n",get_apt_output_filename());
+				rc = 1;
+			}
+		}
+		free(apt_buf);
+	}
+	return rc;
 }

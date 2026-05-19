@@ -28,6 +28,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "commandline_args.hpp"
+#include <cerrno>
+#include <cstdlib>
 
 #define PRECEDENCE_MIN         0x00
 #define PRECEDENCE_NOT         0x01 // !
@@ -47,7 +49,7 @@ extern const char* DispatchArray[];
 extern void (*DispatchFunction[])(struct DecompileInfo di);
 struct tagOPERATOR* ParseGetNthOperand(struct CompileBlock* compile_block, struct tagOPERATOR* expression, uint8_t num);
 
-datatype get_datatype_from_declaration(class COutline* outline, uint32_t item) {
+datatype get_datatype_from_declaration(class COutline* outline, uint64_t item) {
 	tagITEM* p_item = outline->get_item(item);
 	if (!p_item) {
 		return datatype::ANY;
@@ -77,7 +79,6 @@ datatype get_datatype_from_declaration(class COutline* outline, uint32_t item) {
 	case Item::Type::RECEIVE_LONG_STRING:
 		return datatype::LONG_STRING;
 		break;
-		// TODO: add more types, especially datatype::HANDLE
 	default:
 		return datatype::ANY;
 	}
@@ -137,11 +138,27 @@ uint64_t print_var_name(uint16_t memory_address, varscope var_scope, uint64_t* m
 			&& memory_address < max_system_var
 			&& system_vars[memory_address]) {
 		oputs(system_vars[memory_address]);
+		// `hWndForm` (0x04) / `hWndItem` (0x10) refer to the current
+		// form/dlg-item at runtime — the innermost `cur_dlg_item`. Return
+		// that item_id so an outer `PrintDlgItem` can register the handle
+		// as a dialog key and resolve `hWndForm.<field>` references. Without
+		// this, dlgitem lookup runs against id=0 and the `.<field>` leg
+		// falls through to `.dlgitem_%08x`.
+		if ((memory_address == 0x04 || memory_address == 0x10)
+				&& !CDlg::cur_dlg_item.empty()) {
+			return CDlg::cur_dlg_item.top();
+		}
 		return 0;
 	}
 	uint64_t declared_at = outline->lookup_variable(memory_item[var_scope], var_scope, memory_address);
 	if (var_scope == LIB_GLOBALS && !declared_at) {
 		declared_at = outline->lookup_variable(CGlobalDecs::lib_globals, var_scope, memory_address);
+	}
+	if (var_scope == varscope::CURRENT_FORM_CLASS && !declared_at) {
+		// Bytecode emits sc09_var<offset> for class-template Instance
+		// Variables when the access compiles from a control body inside
+		// the class. Vars are registered at CURRENT_OBJECT, so retry there.
+		declared_at = outline->lookup_variable(memory_item[var_scope], varscope::CURRENT_OBJECT, memory_address);
 	}
 	const char16_t* var_name = outline->symbol_lookup(declared_at);
 	if (var_name) {
@@ -150,6 +167,10 @@ uint64_t print_var_name(uint16_t memory_address, varscope var_scope, uint64_t* m
 		}
 		print_utf16(var_name);
 	}else{
+		if (getenv("SITA_DBG_VARNAME")) {
+			fprintf(stderr, "VARNAME-MISS scope=0x%02x mem_item=0x%08lx addr=0x%04x declared_at=0x%08lx\n",
+				var_scope, (unsigned long)memory_item[var_scope], memory_address, (unsigned long)declared_at);
+		}
 		oprintf("sc%02x_var%04x",var_scope,memory_address);
 	}
 	return declared_at;
@@ -176,9 +197,68 @@ void __not_implemented_yet(struct DecompileInfo di) {
 	basic_operation(DispatchArray[di.expression->XOPType], di);
 }
 
+// The `Return` opcode wraps the value of a SAL `Return <expr>` statement.
+// CStatement("Return") already emits the "Return" keyword + a space, so all
+// this handler does is emit the underlying expression (or nothing for a
+// bare Return). Without this, the fallback printed `Return Return()` —
+// syntactically invalid SAL.
+void ReturnOp(struct DecompileInfo di) {
+	if (di.expression->XOperandCount == 0) {
+		return;
+	}
+	di.outer_precedence = PRECEDENCE_MAX;
+	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), di.expected_return_type));
+}
+
+// GetItemViaSymAndhWnd(<symbol/template>, hWnd) is the compiled form of the
+// SAL source expression `hWnd.<name>` when <name> is a form/dialog template
+// referenced by symbol. Emit as `arg1.arg0` (hWnd first, then symbol) to
+// recover the source shape. Sibling of CheckWindowshItem below (which uses
+// the reverse operand order for a different op-code).
+void GetItemViaSymAndhWnd(struct DecompileInfo di) {
+	if (di.expression->XOperandCount < 2) {
+		basic_operation("GetItemViaSymAndhWnd", di);
+		return;
+	}
+	di.outer_precedence = PRECEDENCE_MAX;
+	uint64_t resolved = 0;
+	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 1), datatype::WINDOW_HANDLE));
+	oputs(".");
+	struct DecompileInfo arg0 = adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), datatype::ANY);
+	arg0.result_info = &resolved;
+	decompile_expression(arg0);
+	if (di.result_info) {
+		*di.result_info = resolved;
+	}
+}
+
+// CheckWindowshItem(hWnd, <form/class template>) is the compiled form of the
+// SAL source expression `hWnd.<name>` when <name> is a form/dialog template
+// nested in another window. Emit as `arg1.arg2` so the source-level shape is
+// recovered. The next `.<control>` dereference is handled separately by the
+// dlgitem path.
+void CheckWindowshItem(struct DecompileInfo di) {
+	if (di.expression->XOperandCount < 2) {
+		basic_operation("CheckWindowshItem", di);
+		return;
+	}
+	di.outer_precedence = PRECEDENCE_MAX;
+	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), datatype::WINDOW_HANDLE));
+	oputs(".");
+	uint64_t resolved = 0;
+	struct DecompileInfo arg2 = adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 1), datatype::ANY);
+	arg2.result_info = &resolved;
+	decompile_expression(arg2);
+	// Propagate the resolved template id so an outer PrintDlgItem can walk
+	// into it for the `.<control>` part.
+	if (di.result_info) {
+		*di.result_info = resolved;
+	}
+}
+
 void PrintClassVar(struct DecompileInfo di) {
 	uint32_t class_id = *((uint32_t*)((uint8_t*)di.compile_block + ParseGetNthOperand(di.compile_block, di.expression, 0)->XBuffer));
-	uint32_t class_item = di.outline->get_class_item(class_id);
+	uint64_t class_item = di.outline->get_class_item(class_id);
 	const char16_t* class_name = di.outline->symbol_lookup(class_item);
 	if (class_name) {
 		print_utf16(class_name);
@@ -203,40 +283,136 @@ void PrintVar(struct DecompileInfo di, datatype var_type, uint16_t remaining_ope
 		return;
 	}
 	if (di.expression->XOperandCount == 1+remaining_operands
-			&& di.var_scope != varscope::STATIC_CLASS_VAR
-			&& di.var_scope != varscope::DS_OF_OPERATOR
 			&& di.var_scope != varscope::SCOPE_0d) {
+		// 1-operand DS_OF_OPERATOR / STATIC_CLASS_VAR carries no extra
+		// scope qualifier — the inner operand is already a complete
+		// cascade. Pass through so the inner expression renders alone;
+		// without this the fallback prepended `sc08_` / `sc0f_` to
+		// otherwise-correct output.
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), var_type));
 	}else if (di.expression->XOperandCount == 2+remaining_operands
 			&& di.var_scope == varscope::STATIC_CLASS_VAR) {
 		PrintClassVar(di);
 	}else if (di.expression->XOperandCount == 2+remaining_operands
 			&& di.var_scope == varscope::DS_OF_OPERATOR) {
+		// If op1 is a GetItemViaSymAndhWnd call, it already prints the LHS
+		// (`<hWnd>.<sym>`) as part of its output — emitting op0 first would
+		// duplicate the hWnd. Skip the redundant LHS emission in that case
+		// and let op1 self-render the full chain.
+		struct tagOPERATOR* op1_peek = ParseGetNthOperand(di.compile_block, di.expression, 1);
+		bool op1_self_prefixes = op1_peek && op1_peek->XOPType == 0x8a;
 		uint64_t resultinfo = 0x00;
-		struct DecompileInfo di2 = adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), WINDOW_HANDLE);
-		di2.result_info = &resultinfo;
-		decompile_expression(di2);
-		if (!resultinfo) {
-			// ERROR
-			oprintf("_[ERR:sc%02x]",di.var_scope);
+		if (!op1_self_prefixes) {
+			struct DecompileInfo di2 = adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), WINDOW_HANDLE);
+			di2.result_info = &resultinfo;
+			decompile_expression(di2);
+		}
+		if (op1_self_prefixes) {
+			struct DecompileInfo di_op1 = adapt_dcinfo(di, op1_peek, ANY);
+			di_op1.result_info = &resultinfo;
+			decompile_expression(di_op1);
+			// resultinfo now holds the form item_id (set by GetItemViaSymAndhWnd),
+			// so control-name resolution below can walk into the form.
+		}else if (!resultinfo) {
 			for (uint8_t i=1; i+remaining_operands<di.expression->XOperandCount;i++) {
-				oputs("_");
+				oputs(".");
 				decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, i), ANY));
 			}
 		}else{
 			oputs(".");
 			uint32_t var_address = *((uint32_t*)((uint8_t*)di.compile_block + ParseGetNthOperand(di.compile_block, di.expression, 1)->XBuffer));
-			if (di.result_info) {
-				//*di.result_info = var_address;
-				*di.result_info = di.outline->lookup_variable(resultinfo, varscope::CURRENT_FORM, var_address);
+			uint64_t var_id = di.outline->lookup_variable(resultinfo, varscope::CURRENT_FORM, var_address);
+			bool was_current_form = (var_id != 0);
+			if (!var_id) {
+				// When the LHS is a CDlgParent (Child Table / Child Grid)
+				// and the access targets one of its own Window Variables
+				// (body 0x76), CDlgParent::first_pass registers them under
+				// CURRENT_OBJECT scope — not CURRENT_FORM. Fall back to
+				// CURRENT_OBJECT before giving up.
+				var_id = di.outline->lookup_variable(resultinfo, varscope::CURRENT_OBJECT, var_address);
 			}
-			const char16_t* var_name = di.outline->symbol_lookup(di.outline->lookup_variable(resultinfo, varscope::CURRENT_FORM, var_address));
+			if (di.result_info) {
+				*di.result_info = var_id;
+			}
+			const char16_t* var_name = di.outline->symbol_lookup(var_id);
 			if (var_name) {
-				di.outline->lookup_variable(resultinfo, varscope::CURRENT_FORM, var_address, true);
+				di.outline->lookup_variable(resultinfo, was_current_form ? varscope::CURRENT_FORM : varscope::CURRENT_OBJECT, var_address, true);
 				print_utf16(var_name);
 			}else{
 				oprintf("0x%08x",var_address);
 			}
+		}
+	}else if (di.expression->XOperandCount == 3+remaining_operands
+			&& di.var_scope == varscope::SCOPE_0d) {
+		// SCOPE_0d 3-operand: <form>.<class>.<member-at-offset>. Sister
+		// of SCOPE_0b: same runtime handler, but the operand layout
+		// differs. sc0b is 2-op `(hWnd_lookup, offset)` where the runtime
+		// translates the hWnd to its class via OamhWndItem-style
+		// indirection. sc0d is 3-op `(GethWndForm, offset, class_ref)`
+		// where the class is passed EXPLICITLY as op2 (a Const
+		// ITEM_REFERENCE) — the runtime skips the hWnd→class step.
+		// Source SAL is the form-qualified cross-class member access
+		// `hWndForm.<class>.<member>`. op0 (GethWndForm, XOPType=0x99,
+		// no operands) emits the current form name, op2 is the class
+		// HITEM, op1 is the byte offset of the Instance Variable in the
+		// class's CURRENT_OBJECT memory — same lookup as sc0b.
+		uint64_t class_id = 0;
+		struct tagOPERATOR* op0 = ParseGetNthOperand(di.compile_block, di.expression, 0);
+		struct tagOPERATOR* op2 = ParseGetNthOperand(di.compile_block, di.expression, 2);
+		memcpy(&class_id, (uint8_t*)di.compile_block + op2->XBuffer, 4);
+		uint32_t var_address = *((uint32_t*)((uint8_t*)di.compile_block + ParseGetNthOperand(di.compile_block, di.expression, 1)->XBuffer));
+		uint64_t var_id = class_id ? di.outline->lookup_variable(class_id, varscope::CURRENT_OBJECT, var_address) : 0;
+		const char16_t* var_name = di.outline->symbol_lookup(var_id);
+		const char16_t* class_name = di.outline->symbol_lookup(class_id);
+		// op0 is GethWndForm (XOPType=0x99). When called outside a CDlg
+		// context, its default rendering would emit "0x00000000" — invalid
+		// SAL. Emit the SAL keyword `hWndForm` literally instead, which is
+		// the source-level identifier the compiler lowered to opcode 0x99.
+		if (op0 && op0->XOPType == 0x99) {
+			oputs("hWndForm");
+		} else {
+			decompile_expression(adapt_dcinfo(di, op0, WINDOW_HANDLE));
+		}
+		oputs(".");
+		if (class_name) {
+			print_utf16(class_name);
+		} else {
+			oprintf("class_0x%08x", (uint32_t)class_id);
+		}
+		oputs(".");
+		if (di.result_info) {
+			*di.result_info = var_id;
+		}
+		if (var_name) {
+			print_utf16(var_name);
+		} else {
+			oprintf("offset0x%08x", var_address);
+		}
+	}else if (di.expression->XOperandCount == 2+remaining_operands
+			&& di.var_scope == varscope::SCOPE_0b) {
+		// SCOPE_0b 2-operand: <hWnd>.<class>.<member-at-offset> — Gupta's
+		// `hWnd.ClassName.member` syntax for accessing an Instance Variable
+		// through a typed-handle qualifier. op0 is the
+		// CheckWindowshItem(hWnd, class) cascade (already prints
+		// `<hWnd>.<class>` and captures the class id via result_info).
+		// op1 is a Const carrying the offset of the Instance Variable
+		// inside the class's CURRENT_OBJECT scope. Without this case the
+		// catch-all printed `sc0b_<hWnd>.<class>_[var or const: <offset>]`.
+		uint64_t class_id = 0;
+		struct DecompileInfo di_op0 = adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ANY);
+		di_op0.result_info = &class_id;
+		decompile_expression(di_op0);
+		oputs(".");
+		uint32_t var_address = *((uint32_t*)((uint8_t*)di.compile_block + ParseGetNthOperand(di.compile_block, di.expression, 1)->XBuffer));
+		uint64_t var_id = class_id ? di.outline->lookup_variable(class_id, varscope::CURRENT_OBJECT, var_address) : 0;
+		const char16_t* var_name = di.outline->symbol_lookup(var_id);
+		if (di.result_info) {
+			*di.result_info = var_id;
+		}
+		if (var_name) {
+			print_utf16(var_name);
+		} else {
+			oprintf("offset0x%08x", var_address);
 		}
 	}else{
 		// unsopported scope
@@ -256,13 +432,15 @@ void PrintDlgItem(struct DecompileInfo di, uint16_t remaining_operands, uint16_t
 		return;
 	}
 	uint64_t last_dlgitem = 0;
+	bool explicit_lhs = false;
 	if (di.expression->XOperandCount == offset+1+remaining_operands) {
 		if (!CDlg::cur_dlg_item.empty()) {
 				last_dlgitem = CDlg::cur_dlg_item.top();
 			}
 	}else if (di.expression->XOperandCount == offset+2+remaining_operands) {
+		explicit_lhs = true;
 		di.result_info = &last_dlgitem;
-		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, offset), WINDOW_HANDLE));
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, (uint8_t)offset), WINDOW_HANDLE));
 	}else{
 		//throw std::exception();
 		oputs("???");
@@ -270,20 +448,94 @@ void PrintDlgItem(struct DecompileInfo di, uint16_t remaining_operands, uint16_t
 	}
 
 	struct DecompileInfo d = adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-remaining_operands-1), DLGITEM);
+	// Class-template form access (Form Window Class / Dialog Box Class) emits
+	// the dlgitem position as `GetItemViaSymAndhWnd(<symbol>, hWnd)` (XOP=0x8a)
+	// instead of a Const dlgitem id — control dlgitems aren't stable until an
+	// instance is created, so the compiler defers the lookup to runtime via
+	// symbol resolution. arg0 is a Const carrying the PERMSYM flat-index of
+	// the named control / Window Variable (`j*0x97 + bucket` into the
+	// symbol-hash table — same encoding as `<hWnd>.<member>` access). arg1
+	// is the same hWnd the explicit_lhs branch already printed (or implicit
+	// cur_dlg_item — irrelevant once we have a direct symbol lookup).
+	if (d.expression->XOPType == 0x8a && d.expression->XOperandCount >= 1) {
+		struct tagOPERATOR* arg0 = ParseGetNthOperand(d.compile_block, d.expression, 0);
+		uint32_t raw = *(uint32_t*)((uint8_t*)d.compile_block + arg0->XBuffer);
+		uint64_t resolved = 0;
+		const char16_t* sym = d.outline->symbol_lookup(raw);
+		if (sym) {
+			resolved = raw;
+		} else {
+			sym = d.outline->permsym_name_by_flat_index(raw);
+			if (sym) {
+				resolved = d.outline->permsym_item_by_flat_index(raw);
+			}
+		}
+		if (explicit_lhs) {
+			oputs(".");
+		}
+		if (sym) {
+			print_utf16(sym);
+		} else {
+			oprintf("dlgitem_%08x", raw);
+		}
+		if (di.result_info) {
+			*di.result_info = resolved;
+		}
+		return;
+	}
 	uint32_t dlgitem = *(uint32_t*)(((uint8_t*)d.compile_block + d.expression->XBuffer));
 	if (dlgitem == 0xffffffff) {
 		return;
 	}
-	uint32_t item_ref = d.outline->get_dialog_dlgitem(last_dlgitem, dlgitem);
-	const char16_t* symbol = d.outline->symbol_lookup(item_ref);
-	if (di.expression->XOperandCount == offset+2+remaining_operands) {
-		oputs(".");
+	// dlgitem == 0 is an "identity" step the compiler inserts between a form
+	// instance and a class-method/class-var lookup (see demo-overload.app:
+	// `frm1.ShowText(arg)` compiles with an intermediate dlgitem=0). Emit
+	// nothing and propagate the current last_dlgitem upward so the outer
+	// method/var dispatch resolves against the form, not dlgitem 0.
+	if (dlgitem == 0) {
+		if (di.result_info) {
+			*di.result_info = last_dlgitem;
+		}
+		return;
 	}
+	uint64_t item_ref = d.outline->get_dialog_dlgitem(last_dlgitem, dlgitem);
+	// Global fallback: when the enclosing dialog isn't known (e.g. Internal
+	// Functions at application scope that take `hWndForm.<ctrl>` arguments —
+	// cstruct's ClearBuffer/SetBuffer pattern), scan all registered dialogs
+	// for this dlgitem id. Only used when the dlgitem is unique across the
+	// whole application, so there's no ambiguity.
+	if (!item_ref && !last_dlgitem) {
+		item_ref = d.outline->find_unique_dlgitem(dlgitem);
+	}
+	const char16_t* symbol = d.outline->symbol_lookup(item_ref);
+	// dlgitem ids in [0x8000..0xffff] are Child Table / Table Window column
+	// numbers. Source SAL writes them as `<table>#<N>` (N = dlgitem-0x7fff).
+	// When the table has no named Contents for this slot, lookup returns no
+	// symbol; reconstruct the `#<N>` form so the output is recompilable. If
+	// a named column is registered, keep the `<table>.<column_name>` path.
+	bool column_shorthand = !symbol && (dlgitem >= 0x8000 && dlgitem <= 0xffff);
 	if (symbol) {
+		if (explicit_lhs) {
+			oputs(".");
+		}
 		print_utf16(symbol);
+	}else if (column_shorthand) {
+		if (!explicit_lhs && last_dlgitem) {
+			const char16_t* container_sym = d.outline->symbol_lookup(last_dlgitem);
+			if (container_sym) {
+				print_utf16(container_sym);
+			}
+		}
+		oprintf("#%u", (unsigned)(dlgitem - 0x7fff));
 	}else{
+		if (explicit_lhs) {
+			oputs(".");
+		}
 		oputs("dlgitem_");
 		oprintf("%08x", dlgitem);
+	}
+	if (di.result_info) {
+		*di.result_info = item_ref;
 	}
 }
 
@@ -314,7 +566,37 @@ void Const(struct DecompileInfo di) {
 			}
 		}
 	}else if (di.expected_return_type == NUMBER){
-		print_number((struct SalNumber*)((uint8_t*)di.compile_block + di.expression->XBuffer));
+		// Constant-name resolution: if the enclosing call supplied a
+		// constant family (e.g. "MB_" for SalMessageBox's nFlags), look the
+		// literal value up there first. Value collisions (MB_Ok=0 and
+		// MB_ApplModal=0) resolve by declaration order in the constant
+		// table — first match wins.
+		const char* cname = nullptr;
+		struct SalNumber* num = (struct SalNumber*)((uint8_t*)di.compile_block + di.expression->XBuffer);
+		if (di.constant_family) {
+			// SalNumber is decimal-encoded; pretty-print and reparse as int64_t.
+			// Only resolve plain non-negative integers (no "." or "-") since
+			// constant families are integer flags.
+			char buf[64];
+			sprint_number(buf, num);
+			bool is_int = (buf[0] != '-' && buf[0] != 0);
+			for (const char* p = buf; *p && is_int; ++p) {
+				if (*p < '0' || *p > '9') { is_int = false; break; }
+			}
+			if (is_int) {
+				errno = 0;
+				char* end = nullptr;
+				long long v = strtoll(buf, &end, 10);
+				if (errno == 0 && end && *end == 0) {
+					cname = resolve_sal_constant(di.constant_family, (int64_t)v);
+				}
+			}
+		}
+		if (cname) {
+			oputs(cname);
+		} else {
+			print_number(num);
+		}
 	}else if (di.expected_return_type == DATETIME){
 		uint8_t* number = (uint8_t*)di.compile_block + di.expression->XBuffer;
 		if ((number[0] & 0xe0) == 0x00) {
@@ -333,7 +615,19 @@ void Const(struct DecompileInfo di) {
 			}
 		}
 	}else if (di.expected_return_type == _BOOLEAN){
-		oputs(boolval((struct SalNumber*)((uint8_t*)di.compile_block + di.expression->XBuffer))?"TRUE":"FALSE");
+		// Only emit TRUE/FALSE for literal 0 or 1 — anything else means the
+		// operand isn't really boolean (e.g. Return 42 in a Number-returning
+		// function); fall back to the numeric representation.
+		struct SalNumber* num = (struct SalNumber*)((uint8_t*)di.compile_block + di.expression->XBuffer);
+		char buf[64];
+		sprint_number(buf, num);
+		if (buf[0] == '0' && buf[1] == 0) {
+			oputs("FALSE");
+		} else if (buf[0] == '1' && buf[1] == 0) {
+			oputs("TRUE");
+		} else {
+			print_number(num);
+		}
 	}else if (di.expected_return_type == DLGITEM){
 		uint32_t dlgitem = *(uint32_t*)(((uint8_t*)di.compile_block + di.expression->XBuffer));
 		oprintf("dlgitem_%08x", dlgitem);
@@ -370,6 +664,27 @@ void Const(struct DecompileInfo di) {
 			}
 		}else{
 			const char16_t* str = di.outline->symbol_lookup(item_id);
+			// SalCreateWindow / SalModalDialog / SalSendMsg accept a
+			// form-template `LIBHITEM { uint16 HLIBSAL; uint16 ORDINAL; }` as
+			// their first arg (instead of a Form-Window/Dialog-Box HITEM*).
+			// When direct symbol_lookup misses, try the dynalib map populated
+			// by `init_dynalink_function_map` (covers Dynalink Form Window
+			// type 0x1dc / Dynalink Dialog Box 0x1e2 / etc.). Same encoding
+			// as the late-bound IntFunction calls.
+			if (!str && di.expected_return_type == ITEM_REFERENCE) {
+				uint16_t libsal = (uint16_t)(item_id & 0xFFFF);
+				uint16_t ordinal = (uint16_t)((item_id >> 16) & 0xFFFF);
+				if (libsal && ordinal) {
+					uint64_t dyn_item = di.outline->get_dynalib_var(libsal, ordinal);
+					if (dyn_item) {
+						const char16_t* dyn_name = di.outline->symbol_lookup(dyn_item);
+						if (dyn_name) {
+							str = dyn_name;
+							item_id = dyn_item;
+						}
+					}
+				}
+			}
 			if (str) {
 				print_utf16(str);
 				if (di.expected_return_type == SCOPE_REFERENCE) {
@@ -378,8 +693,8 @@ void Const(struct DecompileInfo di) {
 					*di.result_info = item_id;
 				}
 			}else if (!(item_id & (((1LL<<ITEM_ID_WIDTH)-1LL)<<ITEM_ID_WIDTH)) && di.expected_return_type == SCOPE_REFERENCE) { // method of super-class
-				// FIXME: reference is resolved to memory offset defined by 0x33-item-data-fields of parent classes (derived from).
-				// TODO: if a class itself has size 0, but is derived from another class, which class of those is referenced here?
+				// reference is resolved to memory offset defined by 0x33-
+				// item-data-fields of parent classes (derived from).
 				if (is_verbose()) {
 					oprintf("[superclass:0x%08x].",item_id);
 				}
@@ -397,7 +712,54 @@ void Const(struct DecompileInfo di) {
 		uint64_t value = *(uint64_t*)(((uint8_t*)di.compile_block + di.expression->XBuffer));
 		oprintf("0x%08x",value);
 	}else{
-		oprintf("[var or const: 0x%08x @ sc0x%02x]",*(uint32_t*)(((uint8_t*)di.compile_block + di.expression->XBuffer)),di.var_scope);
+		// Last-resort fallback. If the operand value looks like a valid item_id
+		// and a symbol exists for it, print the symbol — covers e.g. the
+		// CheckWindowshItem(hWnd, <form_template_id>) pattern where the 2nd arg
+		// is a form/class reference with no explicit type.
+		uint32_t raw = *(uint32_t*)(((uint8_t*)di.compile_block + di.expression->XBuffer));
+		uint64_t item_id = 0;
+		memcpy(&item_id, (uint8_t*)di.compile_block + di.expression->XBuffer, ITEM_ID_WIDTH/4);
+		const char16_t* sym = di.outline->symbol_lookup(item_id);
+		if (sym) {
+			print_utf16(sym);
+			if (di.result_info) {
+				*di.result_info = item_id;
+			}
+		}else if (di.var_scope == varscope::DS_OF_OPERATOR) {
+			// Class-member name reference: the compiler encodes `.name` as a
+			// flat index into the symbol-hash table (flat = j*0x97 + bucket).
+			// At runtime the lookup walks the bucket and matches the
+			// PERMSYM whose hItemOwner matches the hWnd's class. All
+			// PERMSYMs in the bucket that share this name spell the same
+			// identifier, so any one gives us the right decompiled name.
+			//
+			// If the flat-index decodes to a recognizable PERMSYM, emit
+			// it; otherwise keep `formref_0x%08x` as an honest unresolved
+			// marker. Set SITA_DBG_FORMREF for raw-index instrumentation.
+			const char16_t* name = di.outline->permsym_name_by_flat_index(raw);
+			if (name) {
+				print_utf16(name);
+			}else{
+				oprintf("formref_0x%08x", raw);
+			}
+		}else if ((di.var_scope == varscope::NONE
+		            || di.var_scope == varscope::INTERNAL_FUNCTION_VAR)
+		          && di.expected_return_type == ANY) {
+			// Last-resort SalNumber heuristic. Reached only when the
+			// upstream `IntFunction` parameter-walk failed to populate
+			// `p.param[i]` for this literal-Const arg position. Parse the
+			// operand bytes as a SalNumber (size byte 1..0x18); when valid,
+			// emit the decimal value, otherwise keep the `[var or const]`
+			// synthetic.
+			struct SalNumber* num = (struct SalNumber*)((uint8_t*)di.compile_block + di.expression->XBuffer);
+			if (num->size >= 1 && num->size <= 0x18) {
+				print_number(num);
+			} else {
+				oprintf("[var or const: 0x%08x @ sc0x%02x]", raw, di.var_scope);
+			}
+		}else{
+			oprintf("[var or const: 0x%08x @ sc0x%02x]", raw, di.var_scope);
+		}
 	}
 }
 
@@ -450,7 +812,7 @@ static void callback1(class COutline* outline, uint64_t item, void* param) {
 
 static void callback4(class COutline* outline, uint64_t item, void* param) {
 	uint32_t* return_type = *(uint32_t**)param;
-	*return_type = item;
+	*return_type = (uint32_t)item;
 }
 
 static void callback3(class COutline* outline, uint64_t item, void* param) {
@@ -475,6 +837,7 @@ void IntFunction(struct DecompileInfo di) {
 		oputs("NULL(");
 	}else if (infun->XOPType != 0x00 && infun->XOPType != 0xa9) {
 		di.result_info = &func_item;
+		di.caller_arg_count = (uint8_t)p.num;
 		decompile_expression(adapt_dcinfo(di, infun, datatype::INTFUNCLASS));
 		di.result_info = return_type;
 		oputs("(");
@@ -484,14 +847,36 @@ void IntFunction(struct DecompileInfo di) {
 
 		const char16_t* ret = di.outline->symbol_lookup(intfun->hItemDoActions);
 		if (ret) {
-			// FIXME: may refer to superclass-function, print its name to uniquely identify callee (note: class may be polymorphic!)
 			// --> is used to correct the offset; -- otherwise, normal INTFUN-call is performed...
 			if (is_verbose()) {
 				oprintf("[FUN_%08x]",intfun->hItemDoActions);
 			}
 			print_utf16(ret);
 		}else{
-			oprintf("__INT_FUN@0x%08x",intfun->hItemDoActions);
+			// Late-bound function call (TD `..` operator). The byte at
+			// XBuffer+4 is the FunInfo flags byte (`tagINTFUNINFO`). When
+			// bit 0x04 is set, the 4 bytes at XBuffer are a `LIBHITEM`
+			// instead of an HITEM*: bytes 0-1 = HLIBSAL of the target
+			// Dynalib, bytes 2-3 = DYNALIB_ORDINAL of the function. The
+			// runtime resolves via `OamDynLibLpOutlineOfHLib(hLib)` +
+			// ordinal lookup; we mirror that with the dynamlib_map
+			// populated by `init_dynalink_function_map`.
+			uint8_t* raw = (uint8_t*)di.compile_block + infun->XBuffer;
+			uint16_t libsal = (uint16_t)raw[0] | ((uint16_t)raw[1] << 8);
+			uint16_t ordinal = (uint16_t)raw[2] | ((uint16_t)raw[3] << 8);
+			uint64_t fn_item = (raw[4] & 0x04) && libsal && ordinal
+				? di.outline->get_dynalib_var(libsal, ordinal)
+				: 0;
+			const char16_t* late_name = fn_item ? di.outline->symbol_lookup(fn_item) : nullptr;
+			if (late_name) {
+				if (is_verbose()) {
+					oprintf("[LATE_%04x_%04x]", libsal, ordinal);
+				}
+				print_utf16(late_name);
+				func_item = fn_item;
+			}else{
+				oprintf("__INT_FUN@0x%08x",intfun->hItemDoActions);
+			}
 		}
 		oputs("(");
 	}
@@ -499,7 +884,28 @@ void IntFunction(struct DecompileInfo di) {
 	// get function signature
 	if (func_item && p.param) {
 		const uint16_t type[] = {0x89, 0}; // Parameters (intern)
-		di.outline->find_children_of_type_and_run(callback1, &p, func_item, type);
+		uint32_t found = di.outline->find_children_of_type_and_run(callback1, &p, func_item, type);
+		// When `intfun->hItemDoActions` resolves via symbol_lookup to a
+		// non-Function item (e.g. a control whose name shadows a Function
+		// declared in an `.apl` library), `find_children` for Parameters
+		// (0x89) returns 0 — the call walks the wrong subtree and every
+		// literal arg falls through to the catch-all SalNumber heuristic.
+		// Mirror the late-bound dynalib resolution: when no Parameters
+		// block was found AND the FunInfo flags byte indicates a LIBHITEM-
+		// encoded reference, look up the real Function via the dynamlib_map
+		// and re-walk its Parameters.
+		if (found == 0 && infun && (infun->XOPType == 0x00 || infun->XOPType == 0xa9)) {
+			uint8_t* raw = (uint8_t*)di.compile_block + infun->XBuffer;
+			uint16_t libsal = (uint16_t)raw[0] | ((uint16_t)raw[1] << 8);
+			uint16_t ordinal = (uint16_t)raw[2] | ((uint16_t)raw[3] << 8);
+			if ((raw[4] & 0x04) && libsal && ordinal) {
+				uint64_t fn_item = di.outline->get_dynalib_var(libsal, ordinal);
+				if (fn_item) {
+					di.outline->find_children_of_type_and_run(callback1, &p, fn_item, type);
+					func_item = fn_item;
+				}
+			}
+		}
 	}
 	if (func_item && return_type) {
 		// write return type to return_type-Variable!!
@@ -526,43 +932,117 @@ void IntFunction(struct DecompileInfo di) {
 }
 
 void ExtFunction(struct DecompileInfo di) {
-	// TODO: write declaration of return type to di.result_info as it is needed by DispatchArray.GetUDVHan
+	const char* ext_func_name = nullptr;
 	struct tagOPERATOR* exfun = ParseGetNthOperand(di.compile_block, di.expression, 0);
-	if (!exfun) {
-		oputs("NULL(");
-	}else if (exfun->XOPType != 0x00 && exfun->XOPType != 0xa9) {
-		// TODO: handle this dynamic case!!
-		oputs("DYNAMICALLY_GENERATED_EXTFUN_CALL<");
-		decompile_expression(adapt_dcinfo(di, exfun, datatype::INTFUNCLASS));
-		oputs(">");
-	}else{
-		struct tagEXFUNINFO* exfun_info = (struct tagEXFUNINFO*)((char*)di.compile_block + exfun->XBuffer);
-		if (exfun_info->hItemLibrary == 0x00) {
-			// embedded library
-			// TODO: define expected parameter types in sal_functions.h and use them here
-			if (exfun_info->AccessKey<NUM_INT_LOCALS) {
-				oprintf("%s(",INT_LOCALS[exfun_info->AccessKey].name);
-			}else{
-				// invalid function
-				oputs("undefined(");
+	// Opcode 0x119 (`@RunBaseClassMsg`) is overloaded at the bytecode level:
+	// when the second operand (the "flag") is 0 the call is a plain
+	// `SalSendClassMessage(msgcode, wParam, lParam)` and the leading
+	// class-ref + flag operands are implicit.  Non-zero flag values map to
+	// other class-dispatch primitives we have not yet identified, so
+	// leave those as a placeholder.
+	uint8_t arg_start = 1;
+	if (exfun && (exfun->XOPType == 0x00 || exfun->XOPType == 0xa9)) {
+		struct tagEXFUNINFO* info = (struct tagEXFUNINFO*)((char*)di.compile_block + exfun->XBuffer);
+		// Two AccessKeys (0x119 TD7.x, 0x1bc TD6.x) both map to
+		// `@RunBaseClassMsg` in INT_LOCALS — match by name.
+		if (info->hItemLibrary == 0x00 && info->AccessKey < NUM_INT_LOCALS
+				&& strcmp(INT_LOCALS[info->AccessKey].name, "@RunBaseClassMsg") == 0
+				&& di.expression->XOperandCount >= 11) {
+			// `@RunBaseClassMsg(<class-handler-ref>, <flag>, <msgcode>,
+			// wParam, lParam)` is the compiler's lowered form of both
+			// `SalSendClassMessage(msgcode, w, l)` AND
+			// `SalSendClassMessageNamed(<class>, msgcode, w, l)`.  The class
+			// argument always exists in the bytecode — it points to a
+			// per-class `On <event>` handler item.  Resolve that handler
+			// back to its owning class via `outline->class_for_handler()`
+			// (built from CLASS_MSGS bodies at outline-init time) and emit
+			// `SalSendClassMessageNamed(<class>, msgcode, w, l)` — semantically
+			// equivalent to the 3-arg form when the named class is the
+			// caller's parent (cbi recompiles to the same bytecode), and
+			// the only correct shape when the source named a sibling class.
+			struct tagOPERATOR* class_op = ParseGetNthOperand(di.compile_block, di.expression, 1);
+			struct tagOPERATOR* class_inner = class_op;
+			for (int d=0; class_inner && d<5 && class_inner->XOPType != 0x00 && class_inner->XOPType != 0xa9; ++d) {
+				if (class_inner->XOperandCount != 1) { class_inner = nullptr; break; }
+				class_inner = ParseGetNthOperand(di.compile_block, class_inner, 0);
 			}
+			// Two encodings observed:
+			//   TD 7.x: class_op = CnvHItemTEMPLATE (0x6c) wrapping a Const
+			//           ITEM_REFERENCE — XBuffer holds the raw uint32 handler id.
+			//   TD 6.x: class_op = CnvNumber<TYPE> (0x50..0x5b) wrapping a Const
+			//           NUMBER — XBuffer holds a SalNumber that decimal-encodes
+			//           the same handler id.
+			// Try uint32 first; if the lookup misses, fall back to the SalNumber
+			// decode.
+			uint64_t handler_id = 0;
+			uint64_t class_id = 0;
+			if (class_inner && (class_inner->XOPType == 0x00 || class_inner->XOPType == 0xa9)) {
+				handler_id = *(uint32_t*)((char*)di.compile_block + class_inner->XBuffer);
+				class_id = handler_id ? di.outline->class_for_handler(handler_id) : 0;
+				if (!class_id) {
+					struct SalNumber* num = (struct SalNumber*)((uint8_t*)di.compile_block + class_inner->XBuffer);
+					char buf[64];
+					sprint_number(buf, num);
+					if (buf[0] != 'N' /* NUMBER_Null */) {
+						char* end = nullptr;
+						int64_t v = strtoll(buf, &end, 10);
+						if (end && *end == '\0' && v > 0) {
+							handler_id = (uint64_t)(uint32_t)v;
+							class_id = di.outline->class_for_handler(handler_id);
+						}
+					}
+				}
+			}
+			const char16_t* class_name = class_id ? di.outline->symbol_lookup(class_id) : nullptr;
+			if (class_name) {
+				oputs("SalSendClassMessageNamed(");
+				print_utf16(class_name, strlen_utf16(class_name));
+				oputs(", ");
+				ext_func_name = "SalSendClassMessageNamed";
+				arg_start = 5; // skip class-ref (1) and flag (3); we already
+				               // wrote the class-name from the resolved symbol
+			}
+		}
+	}
+	if (!ext_func_name) {
+		if (!exfun) {
+			oputs("NULL(");
+		}else if (exfun->XOPType != 0x00 && exfun->XOPType != 0xa9) {
+			oputs("DYNAMICALLY_GENERATED_EXTFUN_CALL<");
+			decompile_expression(adapt_dcinfo(di, exfun, datatype::INTFUNCLASS));
+			oputs(">");
 		}else{
-			// TODO: get expected parameter types and return value!!
-			const char16_t* ret = di.outline->symbol_lookup(exfun_info->hItemFun);
-			if (ret) {
-				print_utf16(ret, strlen_utf16(ret));
+			struct tagEXFUNINFO* exfun_info = (struct tagEXFUNINFO*)((char*)di.compile_block + exfun->XBuffer);
+			if (exfun_info->hItemLibrary == 0x00) {
+				// embedded library
+				if (exfun_info->AccessKey<NUM_INT_LOCALS) {
+					oprintf("%s(",INT_LOCALS[exfun_info->AccessKey].name);
+					ext_func_name = INT_LOCALS[exfun_info->AccessKey].name;
+				}else{
+					// invalid function
+					oputs("undefined(");
+				}
 			}else{
-				oprintf("__EXT_FUN@0x%08x",exfun_info->hItemFun);
+				const char16_t* ret = di.outline->symbol_lookup(exfun_info->hItemFun);
+				if (ret) {
+					print_utf16(ret, strlen_utf16(ret));
+				}else{
+					oprintf("__EXT_FUN@0x%08x",exfun_info->hItemFun);
+				}
+				oputs("(");
 			}
-			oputs("(");
 		}
 	}
 	di.outer_precedence = PRECEDENCE_MAX;
-	for (uint8_t i=1; i<di.expression->XOperandCount; i+=2) {
-		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, i), datatype::ANY));
+	uint8_t src_arg_idx = 0;
+	for (uint8_t i=arg_start; i<di.expression->XOperandCount; i+=2) {
+		struct DecompileInfo arg_di = adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, i), datatype::ANY);
+		arg_di.constant_family = lookup_sal_param_family(ext_func_name, src_arg_idx);
+		decompile_expression(arg_di);
 		if (i+2<di.expression->XOperandCount) {
 			oputs(", ");
 		}
+		src_arg_idx++;
 	}
 	oputs(")");
 }
@@ -751,6 +1231,28 @@ void Not(struct DecompileInfo di) {
 	return;
 }
 
+// If `operand` is a call to a SAL/Sql internal function (XOPType = 0x9
+// ExtFunction, 0-lib), return the function name from INT_LOCALS. Else NULL.
+// Used by GenericCompare to plumb the called function's return family onto
+// the other side of the comparison so `SalMessageBox(...) = 6` emits `= IDYES`.
+static const char* try_ext_func_name(struct DecompileInfo di, struct tagOPERATOR* op) {
+	for (int depth = 0; op && depth < 5; ++depth) {
+		if (op->XOPType == 0x09 && op->XOperandCount >= 1) {
+			struct tagOPERATOR* exfun = ParseGetNthOperand(di.compile_block, op, 0);
+			if (!exfun) return nullptr;
+			if (exfun->XOPType != 0x00 && exfun->XOPType != 0xa9) return nullptr;
+			struct tagEXFUNINFO* info = (struct tagEXFUNINFO*)((char*)di.compile_block + exfun->XBuffer);
+			if (info->hItemLibrary != 0x00) return nullptr;
+			if (info->AccessKey >= NUM_INT_LOCALS) return nullptr;
+			return INT_LOCALS[info->AccessKey].name;
+		}
+		// Single-operand passthrough ops (type conversions, NoOp, etc.)
+		if (op->XOperandCount != 1) return nullptr;
+		op = ParseGetNthOperand(di.compile_block, op, 0);
+	}
+	return nullptr;
+}
+
 void GenericCompare(struct DecompileInfo di, const char* comparator, uint8_t precedence, datatype types) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
 		//throw new std::exception();
@@ -758,12 +1260,28 @@ void GenericCompare(struct DecompileInfo di, const char* comparator, uint8_t pre
 	if (di.expression->XOperandCount != 2) {
 		throw new std::exception();
 	}
+	struct tagOPERATOR* lhs = ParseGetNthOperand(di.compile_block, di.expression, 0);
+	struct tagOPERATOR* rhs = ParseGetNthOperand(di.compile_block, di.expression, 1);
+	// Propagate return-family hints across the `=` / `<` / … operator so the
+	// literal side resolves against the call side's return constants.
+	const char* lhs_fam = nullptr;
+	const char* rhs_fam = nullptr;
+	if (types == NUMBER) {
+		const char* lhs_call = try_ext_func_name(di, lhs);
+		const char* rhs_call = try_ext_func_name(di, rhs);
+		if (lhs_call) rhs_fam = lookup_sal_return_family(lhs_call);
+		if (rhs_call) lhs_fam = lookup_sal_return_family(rhs_call);
+	}
 	PRECEDENCE(precedence);
 	oputs(print_brackets?"(":"");
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), types));
+	struct DecompileInfo dil = adapt_dcinfo(di, lhs, types);
+	if (lhs_fam) dil.constant_family = lhs_fam;
+	decompile_expression(dil);
 	oprintf(" %s ",comparator);
 	di.outer_precedence--;
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 1), types));
+	struct DecompileInfo dir = adapt_dcinfo(di, rhs, types);
+	if (rhs_fam) dir.constant_family = rhs_fam;
+	decompile_expression(dir);
 	oputs(print_brackets?")":"");
 	return;
 }
@@ -928,7 +1446,6 @@ void GetVarDate(struct DecompileInfo di) {
 }
 
 void GetVarHandle(struct DecompileInfo di) {
-	// TODO: what does it mean if expected_type is VARIABLE_HANDLE, i.e. if this function is nested
 
 	//di.expression->XOperandCount
 	uint16_t expected_params = di.expression->XOperandCount;
@@ -953,7 +1470,6 @@ void GetVarHandle(struct DecompileInfo di) {
 		break;
 	}
 	if (di.expression->XOperandCount > expected_params) {
-		// FIXME: why does this occur??
 		// seems to be a problem especially if this function is called inside of
 		if (is_verbose()) {
 			oputs("[WARNING: GetVarHandle: wrong number of parameters!]");
@@ -1056,20 +1572,34 @@ void PutVarString(struct DecompileInfo di) {
 void GetUDVHan(struct DecompileInfo di) {
 	if (di.expression->XOperandCount == 2) {
 		//oputs("GetUDVHan(");
-		// TODO: we need the concrete type/class-definition of the object reference returned by this call!! otherwise we couldn't resolve memory-address to identifier
+		uint64_t* caller_result = di.result_info;
 		uint64_t var_decl = 0;
 		di.result_info = &var_decl;
-		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ANY)); // TODO: Handle type??
-		uint32_t class_def = 0;
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ANY));
+		uint64_t class_def = 0;
 		struct ItemBody* item_body = CItem::get_itembody(di.outline, var_decl, 0x14);
-		if (item_body) {
-			if (item_body->data[0] == 0x05) {
-				class_def = (*(uint32_t*)&item_body->data[4]);
+		if (item_body && item_body->size >= 8) {
+			// WINATTR's first byte discriminates the variable kind.
+			//   0x05 — FunctionalVar / UDV: class id at offset 4.
+			//   0xfa — CoClassVar (data[0:2]=0x01fa, CO_CLASS_OBJECT):
+			//          CoClass id at offset 4. The cascade then walks the
+			//          CoClass's `Derived From: Interface: ...` block (Zb-style
+			//          DERIVED_FROM_INTERFACE registration) into the
+			//          interface's Instance Variables.
+			if (item_body->data[0] == 0x05 || item_body->data[0] == 0xfa) {
+				// On x64, class id is the wide 8-byte packed item-id at
+				// data[4..11]; on 32-bit it's a 4-byte value at data[4..7].
+				// Same pattern as ArrayObjectVar below.
+#ifdef TDx64
+				class_def = *(uint64_t*)&item_body->data[4];
+#else
+				class_def = *(uint32_t*)&item_body->data[4];
+#endif
 			}
 		}
 		struct tagOPERATOR* op = ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-1);
 		uint32_t offset = *(uint32_t*)(((uint8_t*)di.compile_block + op->XBuffer));
-		uint32_t vardef = di.outline->lookup_variable(class_def, varscope::CURRENT_OBJECT, offset, false);
+		uint64_t vardef = di.outline->lookup_variable(class_def, varscope::CURRENT_OBJECT, offset, false);
 		const char16_t* varname = di.outline->symbol_lookup(vardef);
 
 		if (varname) {
@@ -1081,6 +1611,14 @@ void GetUDVHan(struct DecompileInfo di) {
 		}else{
 			// probably the object itself is referenced
 		}
+		// Propagate the resolved member declaration so an outer cascade
+		// (e.g. ArrayObjectVar walking into the element's class) can drill
+		// into it. Without this, nested `uMenu.uaivItem[i].<member>` falls
+		// back to `[ArrayObjectVar]offset0x…` even though the class layout
+		// is known.
+		if (caller_result) {
+			*caller_result = vardef ? vardef : var_decl;
+		}
 		//oputs(")");
 		return;
 	}
@@ -1091,13 +1629,23 @@ void GetUDVHan(struct DecompileInfo di) {
 void New(struct DecompileInfo di) {
 	if (di.expression->XOperandCount == 1) {
 		struct tagOPERATOR* op = ParseGetNthOperand(di.compile_block, di.expression, 0);
-		uint32_t class_type = *(uint32_t*)(((uint8_t*)di.compile_block + op->XBuffer));
+		// On x64, the class-reference operand is an 8-byte packed item-id
+		// (4-byte hindex + 4-byte seg); on 32-bit it's a 4-byte packed
+		// value (2-byte hindex + 2-byte seg). Reading only 4 bytes on x64
+		// loses the seg half and symbol_lookup misses on the truncated
+		// class id. Same widening pattern as ArrayObjectVar / GetUDVHan
+		// above.
+#ifdef TDx64
+		uint64_t class_type = *(uint64_t*)(((uint8_t*)di.compile_block + op->XBuffer));
+#else
+		uint64_t class_type = *(uint32_t*)(((uint8_t*)di.compile_block + op->XBuffer));
+#endif
 		const char16_t* var_name = di.outline->symbol_lookup(class_type);
 		oputs("new ");
 		if (var_name) {
 			print_utf16(var_name);
 		}else{
-			oprintf("0x%08x",class_type);
+			oprintf("0x%08llx", (unsigned long long)class_type);
 		}
 		return;
 	}
@@ -1171,6 +1719,7 @@ void PutUDVHan(struct DecompileInfo di) {
 
 void AdjUDVHan(struct DecompileInfo di) {
 	if (di.expression->XOperandCount == 2) {
+		uint64_t* caller_result = di.result_info;
 		uint64_t var_decl = 0;
 		di.result_info = &var_decl;
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), UDV));
@@ -1178,12 +1727,21 @@ void AdjUDVHan(struct DecompileInfo di) {
 		oputs(".");
 		struct tagOPERATOR* op = ParseGetNthOperand(di.compile_block, di.expression, 1);
 		uint32_t offset = *(uint32_t*)(((uint8_t*)di.compile_block + op->XBuffer));
-		uint32_t var_item = di.outline->lookup_variable(var_type, varscope::CURRENT_OBJECT, offset, 0);
+		uint64_t var_item = di.outline->lookup_variable(var_type, varscope::CURRENT_OBJECT, offset, 0);
 		const char16_t* var_name = di.outline->symbol_lookup(var_item);
 		if (var_name) {
 			print_utf16(var_name);
 		}else{
 			oprintf("0x%08x",offset);
+		}
+		// Propagate the resolved member item id to the caller so a wrapping
+		// ArrayObjectVar / GetUDVHan can read its body 0x14 and resolve
+		// further `[idx].<field>` / `.<member>` cascades. Previously
+		// AdjUDVHan overwrote `di.result_info` for its own arg-0 recursion
+		// and never restored the caller's pointer — outer cascades got
+		// resultinfo=0 and fell back to `[ArrayObjectVar]offset...`.
+		if (caller_result) {
+			*caller_result = var_item;
 		}
 		return;
 	}
@@ -1315,16 +1873,52 @@ void IntFunSetupClassObject(struct DecompileInfo di) {
 		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount == 4) {
-			decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 2), ANY)); // TODO: Handle type??
-			oputs(".");
+			// 4-operand `<class>.<obj>..<method>(...)` cascade.
+			// Operand layout:
+			//   op0 = method (Const ITEM_REFERENCE)
+			//   op1 = hWnd resolver tree (XOPType 0x8d/0x98) — drives runtime
+			//         dispatch but doesn't carry source-level identifier
+			//   op2 = MakeUDVRf — converts hWnd to UDV reference (runtime
+			//         plumbing; class id can be derived from op3's WINATTR
+			//         instead of unwinding this)
+			//   op3 = receiver (Const ITEM_REFERENCE → FunctionalVar /
+			//         CoClassVar item)
+			// To recover the class qualifier, walk op3's HITEM → its body
+			// 0x14 (WINATTR). For FunctionalVar (data[0]=0x05) and
+			// CoClassVar (data[0]=0xfa), bytes 4..7 hold the class HITEM.
+			// Source SAL emits as `<class>.<receiver>..<method>(...)`, with
+			// receiver printed as a SCOPE_REFERENCE (qualified) and class
+			// name first.
+			struct tagOPERATOR* op3 = ParseGetNthOperand(di.compile_block, di.expression, 3);
+			uint64_t receiver_id = 0;
+			if (op3 && (op3->XOPType == 0x00 || op3->XOPType == 0xa9)) {
+				memcpy(&receiver_id, (uint8_t*)di.compile_block + op3->XBuffer, ITEM_ID_WIDTH/4);
+			}
+			uint64_t class_hitem = 0;
+			if (receiver_id) {
+				struct ItemBody* wa = CItem::get_itembody(di.outline, receiver_id, 0x14);
+				if (wa && wa->size >= 8 && (wa->data[0] == 0x05 || wa->data[0] == 0xfa)) {
+					class_hitem = *(uint32_t*)&wa->data[4];
+				}
+			}
+			const char16_t* class_name = class_hitem ? di.outline->symbol_lookup(class_hitem) : nullptr;
+			if (class_name) {
+				print_utf16(class_name);
+				oputs(".");
+			} else {
+				// Fallback to a placeholder if the WINATTR-based decode
+				// ever misses.
+				oputs("[[CLASS??]].");
+			}
+			decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 3), SCOPE_REFERENCE));
 			decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ITEM_REFERENCE));
 			return;
 		}else if (di.expression->XOperandCount == 3) {
-		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 2), SCOPE_REFERENCE)); // TODO: Handle type??
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 2), SCOPE_REFERENCE));
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ITEM_REFERENCE));
 		return;
 	}else if (di.expression->XOperandCount == 2) {
-		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 1), SCOPE_REFERENCE)); // TODO: Handle type??
+		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 1), SCOPE_REFERENCE));
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ITEM_REFERENCE));
 		return;
 	}
@@ -1374,7 +1968,6 @@ void IntFunSetupUDVRef(struct DecompileInfo di) {
 		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount == 3) {
-		// TODO: unknown role of thrid parameter -- it is ignored for now
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 1), UDV));
 		oputs(".");
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ITEM_REFERENCE));
@@ -1387,7 +1980,6 @@ void IntFunSetupUDVRef(struct DecompileInfo di) {
 void GethItemhWnd(struct DecompileInfo di) {
 	if (di.expected_return_type != VARIABLE_HANDLE && di.expected_return_type != WINDOW_HANDLE && di.expected_return_type != ANY) {
 		basic_operation("GethItemhWnd",di);
-		// throw new std::exception(); // TODO: why is VARIABLE_NUMBER an expected return type?
 		return;
 	}
 	if (di.expression->XOperandCount == 1) {
@@ -1401,7 +1993,6 @@ void GethItemhWnd(struct DecompileInfo di) {
 void CnvHItemTEMPLATE(struct DecompileInfo di) {
 	if (di.expected_return_type != TEMPLATE && di.expected_return_type != ANY) {
 		basic_operation("CnvHItemTEMPLATE",di);
-		// throw new std::exception(); // TODO: why is VARIABLE_NUMBER an expected return type?
 		return;
 	}
 	if (di.expression->XOperandCount == 1) {
@@ -1432,7 +2023,6 @@ void GethWndMDI(struct DecompileInfo di) {
 }
 
 void GethWndForm(struct DecompileInfo di) {
-	// TODO: if called from PrintDlgItem,
 	// the current item shouldn't be printed
 	// - and PrintDlgItem shouldn't print the scope seperator "."
 	if (di.expected_return_type != WINDOW_HANDLE) {
@@ -1474,7 +2064,43 @@ void IntFunSetupLate(struct DecompileInfo di) {
 	}
 	if (di.expression->XOperandCount == 1) {
 		oputs("..");
-		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ITEM_REFERENCE));
+		struct tagOPERATOR* op0 = ParseGetNthOperand(di.compile_block, di.expression, 0);
+		// Late-bound `..method(args)` fallback: when the inner Const carries no
+		// item_id (TD 6.3 / TD 7.x callsites where the compiler omitted the
+		// statically-resolved method handle), the method-name PERMSYM
+		// flat-index sits at compile_block + inner.XBuffer + 5 (uint16). Use
+		// it to print the method name AND propagate a synthetic func_item to
+		// the caller so the parameter-signature walk fills in arg types.
+		bool resolved = false;
+		if (op0 && (op0->XOPType == 0x00 || op0->XOPType == 0xa9)) {
+			uint64_t inner_item_id = 0;
+			memcpy(&inner_item_id, (uint8_t*)di.compile_block + op0->XBuffer, ITEM_ID_WIDTH/4);
+			if (inner_item_id == 0) {
+				uint16_t flat = *(uint16_t*)((uint8_t*)di.compile_block + op0->XBuffer + 5);
+				const char16_t* name = di.outline->permsym_name_by_flat_index(flat);
+				if (name) {
+					print_utf16(name);
+					if (di.result_info) {
+						// Late-bound dispatch is polymorphic — a method like
+						// `_Clear` may be defined in many classes, sometimes
+						// with different parameter counts. The flat-index
+						// resolves to ONE specific permsym, but that
+						// permsym's hItem may point to an overload whose
+						// Parameters subtree doesn't match the call site.
+						// Pick a permsym in the same bucket with the same
+						// name AND a matching Parameters child-count; fall
+						// back to the j-th permsym if no better match is
+						// found.
+						uint8_t expected_args = di.caller_arg_count;
+						*di.result_info = di.outline->permsym_item_by_flat_and_arity(flat, expected_args);
+					}
+					resolved = true;
+				}
+			}
+		}
+		if (!resolved) {
+			decompile_expression(adapt_dcinfo(di, op0, ITEM_REFERENCE));
+		}
 		return;
 	}
 	if (di.expression->XOperandCount == 3) {
@@ -1482,7 +2108,27 @@ void IntFunSetupLate(struct DecompileInfo di) {
 		oputs(".");
 		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 2), ITEM_REFERENCE));
 		oputs("..");
-		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ITEM_REFERENCE));
+		// Same flat-index fallback as the 1-op case (operand 0 is the method ref).
+		struct tagOPERATOR* mref = ParseGetNthOperand(di.compile_block, di.expression, 0);
+		bool resolved = false;
+		if (mref && (mref->XOPType == 0x00 || mref->XOPType == 0xa9)) {
+			uint64_t inner_item_id = 0;
+			memcpy(&inner_item_id, (uint8_t*)di.compile_block + mref->XBuffer, ITEM_ID_WIDTH/4);
+			if (inner_item_id == 0) {
+				uint16_t flat = *(uint16_t*)((uint8_t*)di.compile_block + mref->XBuffer + 5);
+				const char16_t* name = di.outline->permsym_name_by_flat_index(flat);
+				if (name) {
+					print_utf16(name);
+					if (di.result_info) {
+						*di.result_info = di.outline->permsym_item_by_flat_and_arity(flat, di.caller_arg_count);
+					}
+					resolved = true;
+				}
+			}
+		}
+		if (!resolved) {
+			decompile_expression(adapt_dcinfo(di, mref, ITEM_REFERENCE));
+		}
 		return;
 	}
 	basic_operation("IntFunSetupLate",di);
@@ -1647,13 +2293,14 @@ void GetArayUDV(struct DecompileInfo di) {
 	oputs("]");
 }
 
+// 0-operand `Get<Type>` is the implicit `MyValue` reference — same
+// source-form as `put_field_impl`'s 1-operand branch (`Set MyValue = …`).
 void GetFieldNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
 		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount < 1) {
-		// FIXME: why does this occur?
-		basic_operation("GetFieldNumber",di);
+		oputs("MyValue");
 		return;
 	}
 	PrintDlgItem(di, 0);
@@ -1667,8 +2314,7 @@ void GetFieldString(struct DecompileInfo di) {
 		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount < 1) {
-		// FIXME: why does this occur?
-		basic_operation("GetFieldString",di);
+		oputs("MyValue");
 		return;
 	}
 	PrintDlgItem(di, 0);
@@ -1679,8 +2325,7 @@ void GetFieldDate(struct DecompileInfo di) {
 		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount < 1) {
-		// FIXME: why does this occur?
-		basic_operation("GetFieldDate",di);
+		oputs("MyValue");
 		return;
 	}
 	PrintDlgItem(di, 0);
@@ -1693,85 +2338,60 @@ void GetFieldHandle(struct DecompileInfo di) {
 	}
 	*/
 	if (di.expression->XOperandCount < 1) {
-		// FIXME: why does this occur?
-		basic_operation("GetFieldHandle",di);
+		oputs("MyValue");
 		return;
 	}
 	PrintDlgItem(di, 0);
+}
+
+// A `Set MyValue = value` where `MyValue` is the CURRENT datafield (implicit
+// this) is compiled as a 1-operand PutField<Type>(value) with no explicit
+// dlgitem. The explicit-dlgitem case has 2 operands and decompiles correctly
+// via PrintDlgItem. For the 1-operand case the source-level shape is always
+// `Set MyValue = <rhs>` — `MyValue` is SAL's polymorphic keyword for the
+// current data field's content, used for String / Number / Date / Boolean
+// alike.
+static void put_field_impl(struct DecompileInfo di, datatype value_type) {
+	if (di.expression->XOperandCount == 0) {
+		throw new std::exception();
+	}
+	PRECEDENCE(PRECEDENCE_ASSIGN);
+	oputs(print_brackets?"(":"");
+	di.outer_precedence = PRECEDENCE_MAX;
+	if (di.expression->XOperandCount == 1) {
+		oputs("MyValue");
+	} else {
+		PrintDlgItem(di, 1);
+	}
+	oputs(" = ");
+	di.outer_precedence = PRECEDENCE_ASSIGN - 1;
+	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-1), value_type));
+	oputs(print_brackets?")":"");
 }
 
 void PutFieldNumber(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != NUMBER && di.expected_return_type != _BOOLEAN) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount == 0) {
-		throw new std::exception();
-	}
-	if (di.expression->XOperandCount == 1) {
-		// FIXME: why does this occur?
-		oputs("PutFieldNumber(");
-		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-1), NUMBER));
-		oputs(")");
-		return;
-	}
-	PRECEDENCE(PRECEDENCE_ASSIGN);
-	oputs(print_brackets?"(":"");
-	di.outer_precedence = PRECEDENCE_MAX;
-	PrintDlgItem(di, 1);
-	oputs(" = ");
-	di.outer_precedence = PRECEDENCE_ASSIGN - 1;
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-1), NUMBER));
-	oputs(print_brackets?")":"");
+	put_field_impl(di, NUMBER);
 }
 
 void PutFieldString(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != STRING) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount == 0) {
-		throw new std::exception();
-	}
-	if (di.expression->XOperandCount == 1) {
-		// FIXME: why does this occur?
-		oputs("PutFieldString(");
-		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-1), STRING));
-		oputs(")");
-		return;
-	}
-	PRECEDENCE(PRECEDENCE_ASSIGN);
-	oputs(print_brackets?"(":"");
-	di.outer_precedence = PRECEDENCE_MAX;
-	PrintDlgItem(di, 1);
-	oputs(" = ");
-	di.outer_precedence = PRECEDENCE_ASSIGN - 1;
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-1), STRING));
-	oputs(print_brackets?")":"");
+	put_field_impl(di, STRING);
 }
 
 void PutFieldDate(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != DATETIME) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount == 0) {
-		throw new std::exception();
-	}
-	if (di.expression->XOperandCount == 1) {
-		// FIXME: why does this occur?
-		oputs("PutFieldDate(");
-		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-1), DATETIME));
-		oputs(")");
-		return;
-	}
-	PRECEDENCE(PRECEDENCE_ASSIGN);
-	oputs(print_brackets?"(":"");
-	di.outer_precedence = PRECEDENCE_MAX;
-	PrintDlgItem(di, 1);
-	oputs(" = ");
-	di.outer_precedence = PRECEDENCE_ASSIGN - 1;
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-1), DATETIME));
-	oputs(print_brackets?")":"");
+	put_field_impl(di, DATETIME);
 }
 
+// Kept as a no-op for safety: NoOp isn't actually exercised for Return
+// (Return uses PutReturnNumber at XOPType 0x42 — see that handler instead).
 void NoOp(struct DecompileInfo di) {
 }
 
@@ -1780,8 +2400,7 @@ void GetCheck(struct DecompileInfo di) {
 		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount < 1) {
-		// FIXME: why does this occur?
-		basic_operation("GetCheck",di);
+		oputs("MyValue");
 		return;
 	}
 	PrintDlgItem(di, 0);
@@ -1791,24 +2410,7 @@ void PutCheck(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount == 0) {
-		throw new std::exception();
-	}
-	if (di.expression->XOperandCount == 1) {
-		// FIXME: why does this occur?
-		oputs("PutCheck(");
-		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-1), _BOOLEAN));
-		oputs(")");
-		return;
-	}
-	PRECEDENCE(PRECEDENCE_ASSIGN);
-	oputs(print_brackets?"(":"");
-	di.outer_precedence = PRECEDENCE_MAX;
-	PrintDlgItem(di, 1);
-	oputs(" = ");
-	di.outer_precedence = PRECEDENCE_ASSIGN - 1;
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-1), _BOOLEAN));
-	oputs(print_brackets?")":"");
+	put_field_impl(di, _BOOLEAN);
 }
 
 void GetScroll(struct DecompileInfo di) {
@@ -1816,8 +2418,7 @@ void GetScroll(struct DecompileInfo di) {
 		//throw new std::exception();
 	}
 	if (di.expression->XOperandCount < 1) {
-		// FIXME: why does this occur?
-		basic_operation("GetCheck",di);
+		oputs("MyValue");
 		return;
 	}
 	PrintDlgItem(di, 0);
@@ -1827,24 +2428,7 @@ void PutScroll(struct DecompileInfo di) {
 	if (di.expected_return_type != ANY && di.expected_return_type != _BOOLEAN && di.expected_return_type != NUMBER) {
 		//throw new std::exception();
 	}
-	if (di.expression->XOperandCount == 0) {
-		throw new std::exception();
-	}
-	if (di.expression->XOperandCount == 1) {
-		// FIXME: why does this occur?
-		oputs("PutScroll(");
-		decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-1), NUMBER));
-		oputs(")");
-		return;
-	}
-	PRECEDENCE(PRECEDENCE_ASSIGN);
-	oputs(print_brackets?"(":"");
-	di.outer_precedence = PRECEDENCE_MAX;
-	PrintDlgItem(di, 1);
-	oputs(" = ");
-	di.outer_precedence = PRECEDENCE_ASSIGN - 1;
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, di.expression->XOperandCount-1), NUMBER));
-	oputs(print_brackets?")":"");
+	put_field_impl(di, NUMBER);
 }
 
 void PutArrayDate(struct DecompileInfo di) {
@@ -1904,7 +2488,17 @@ void PutReturnNumber(struct DecompileInfo di) {
 	if (di.expression->XOperandCount != 1) {
 		throw new std::exception();
 	}
-	decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), NUMBER));
+	// If the enclosing statement already asked for boolean/dlgitem/etc.
+	// (e.g. `Return 0` inside SAM_Validate), preserve that context so the
+	// inner Const can render as TRUE/FALSE. Default to NUMBER otherwise.
+	datatype inner_type = NUMBER;
+	if (di.expected_return_type == _BOOLEAN || di.expected_return_type == DLGITEM
+			|| di.expected_return_type == DATE_TIME) {
+		inner_type = di.expected_return_type;
+	}
+	struct DecompileInfo inner = adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), inner_type);
+	inner.constant_family = di.constant_family;  // propagate any constant-family hint
+	decompile_expression(inner);
 }
 
 void PutReturnDate(struct DecompileInfo di) {
@@ -2838,7 +3432,6 @@ void ArrayObjectVar(struct DecompileInfo di) {
 		PRECEDENCE(PRECEDENCE_ASSIGN);
 		oputs((di.expression->XOperandCount == 4 && print_brackets)?"(":"");
 
-		// TODO: type?? --> array-reference
 		uint64_t resultinfo = 0;
 		struct DecompileInfo di2 = adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 0), ANY);
 		di2.result_info = &resultinfo;
@@ -2852,12 +3445,21 @@ void ArrayObjectVar(struct DecompileInfo di) {
 			struct ItemBody* item_body = CItem::get_itembody(di.outline, resultinfo, 0x14);
 			if (item_body) {
 				if (item_body->data[0] == 0x05) {
-					uint32_t class_type = *(uint32_t*)&item_body->data[4];
+					// On x64, WINATTR body 0x14 stores the class id as an
+					// 8-byte packed item-id at data[4..11] (4-byte hindex
+					// + 4-byte seg); on 32-bit it's a 4-byte packed value
+					// at data[4..7] (2-byte hindex + 2-byte seg). Reading
+					// only 4 bytes on x64 loses the seg half and
+					// lookup_variable misses on the truncated class id.
+#ifdef TDx64
+					uint64_t class_type = *(uint64_t*)&item_body->data[4];
+#else
+					uint64_t class_type = *(uint32_t*)&item_body->data[4];
+#endif
 					struct tagOPERATOR* op = ParseGetNthOperand(di.compile_block, di.expression, 2);
 					uint32_t offset = *(uint32_t*)(((uint8_t*)di.compile_block + op->XBuffer));
 					var = di.outline->lookup_variable(class_type, varscope::CURRENT_OBJECT, offset, false);
 					if (var) {
-						// TODO: extract variable type
 						const char16_t* str = di.outline->symbol_lookup(var);
 						if (str) {
 							print_utf16(str);
@@ -2877,7 +3479,6 @@ void ArrayObjectVar(struct DecompileInfo di) {
 		if (di.expression->XOperandCount == 4) {
 			oputs(" = ");
 			di.outer_precedence = PRECEDENCE_ASSIGN - 1;
-			// TODO: pass variable type!!!
 			decompile_expression(adapt_dcinfo(di, ParseGetNthOperand(di.compile_block, di.expression, 3), get_datatype_from_declaration(di.outline,var)));
 			oputs(print_brackets?")":"");
 		}
@@ -2898,7 +3499,6 @@ void ArrayObjectAddress(struct DecompileInfo di) {
 	basic_operation("ArrayObjectVar", di);
 }
 
-// TODO: implement missing functions and complete this array
 void (*DispatchFunction[])(struct DecompileInfo di) = {
 		Const,
 		Add,
@@ -3038,8 +3638,8 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		CnvDWORDNumber,
 		__not_implemented_yet, // CnvUnRef
 		CnvHSTRINGhString,
-		__not_implemented_yet, // GetItemViaSymAndhWnd
-		__not_implemented_yet, // CheckWindowshItem
+		GetItemViaSymAndhWnd,
+		CheckWindowshItem,
 		__not_implemented_yet, // CheckSqlContext
 		GetParenthWndByhItem,
 		__not_implemented_yet, // GetParenthWndByhItemIndirect
@@ -3135,7 +3735,7 @@ void (*DispatchFunction[])(struct DecompileInfo di) = {
 		CnvStringLPVOID, // [duplicate] ; works on BINARY instead of STRING
 		New, // New2 (for use with IntConstructor)
 		IntConstructor,
-		__not_implemented_yet, // Return
+		ReturnOp,
 		CnvLONGLONGNumber,
 		CnvNumberLONGLONG,
 		__not_implemented_yet, // CnvRecNumberLPLONGLONG

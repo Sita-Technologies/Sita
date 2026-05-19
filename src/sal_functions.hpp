@@ -35,4 +35,17 @@ extern enum datatype any[];
 #define NUM_INT_LOCALS 1483
 extern struct func_header INT_LOCALS[NUM_INT_LOCALS];
 
+// Resolve a SAL constant value to its name within the given family.
+// Family keys are prefixes like "MB_", "TBL_", "COLOR_". Returns NULL if no
+// match.
+const char* resolve_sal_constant(const char* family_key, int64_t value);
+
+// For (SAL function name, 0-based param index), return the constant-family
+// key that param accepts (e.g. "MB_" for SalMessageBox's nFlags), or NULL.
+const char* lookup_sal_param_family(const char* function, uint8_t param_index);
+
+// Return the constant-family key for `function`'s return value, or NULL.
+// Used to resolve `If SomeFunc() = <literal>` comparisons.
+const char* lookup_sal_return_family(const char* function);
+
 #endif /* SAL_FUNCTIONS_HPP_ */

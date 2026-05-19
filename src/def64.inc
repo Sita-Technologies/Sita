@@ -36,6 +36,7 @@
 #define CClass            CClass64
 #define CObject           CObject64
 #define CDlg              CDlg64
+#define CDlgParent        CDlgParent64
 #define CCase             CCase64
 #define COn               COn64
 #define CStatement        CStatement64

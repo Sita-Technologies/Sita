@@ -18,10 +18,28 @@
  */
 
 #include "sal_functions.hpp"
+#include <cstring>
+#include <cstdint>
+#include <cstddef>
+
+// SAL constant tables + per-function param → family bindings.
+// Defined in anonymous namespaces via `static` in the generated .inc files.
+#include "sita_sal_constants.inc"
+#include "sita_sal_func_binds.inc"
+
+// Public wrappers (declared in sal_functions.hpp).
+const char* resolve_sal_constant(const char* family_key, int64_t value) {
+	return _impl_resolve_sal_constant(family_key, value);
+}
+const char* lookup_sal_param_family(const char* function, uint8_t param_index) {
+	return _impl_lookup_sal_param_family(function, param_index);
+}
+const char* lookup_sal_return_family(const char* function) {
+	return _impl_lookup_sal_return_family(function);
+}
 
 enum datatype any [] = { ANY };
 
-// TODO: update datatypes
 struct func_header INT_LOCALS[NUM_INT_LOCALS] = {
 		// 0x0000
 		{"undefined",ANY,(uint8_t)-1,any},

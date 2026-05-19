@@ -17,8 +17,7 @@
  * <https://www.gnu.org/licenses/>.
  */
 
-#define _CRT_SECURE_NO_WARNINGS
-#include "COutline.hpp"
+#include "item.hpp"
 
 #define TDx64
-#include "process_outline.cpp"
+#include "item.cpp"

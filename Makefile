@@ -1,20 +1,61 @@
-HPPS = commandline_args.hpp COutline.hpp decompile.hpp helper.hpp \
-       item.hpp outline_decs.hpp SalNumber.hpp system_variables.hpp \
-       sal_datatypes.hpp sal_functions.hpp process_outline.hpp \
-       def4.inc undef64.inc
-OBJS = commandline_args.o COutline.o decompile.o helper.o item.o \
-       main.o SalNumber.o system_variables.o COutline64.o item64.o \
-       process_outline.o process_outline64.o decompile64.o sal_functions.o
-TARGET = Sita
+# Sita — Gupta Team Developer decompiler
+#
+# Build artifacts (objects, dependency files, final binary) go into build/.
+# Sources live in src/. Run `make` from the repository root.
+
+CXX      ?= g++
+CXXFLAGS ?= -Wall -O2
+LDFLAGS  ?=
+LDLIBS   ?=
+
+PREFIX  ?= /usr/local
+BINDIR  ?= $(PREFIX)/bin
+
+SRCDIR   := src
+BUILDDIR := build
+
+TARGET := $(BUILDDIR)/Sita
+
+SRCS := \
+    commandline_args.cpp \
+    COutline.cpp \
+    COutline64.cpp \
+    decompile.cpp \
+    decompile64.cpp \
+    helper.cpp \
+    item.cpp \
+    item64.cpp \
+    main.cpp \
+    process_outline.cpp \
+    process_outline64.cpp \
+    sal_functions.cpp \
+    SalNumber.cpp \
+    system_variables.cpp
+
+OBJS := $(SRCS:%.cpp=$(BUILDDIR)/%.o)
+DEPS := $(OBJS:.o=.d)
+
+.PHONY: all clean install uninstall
 
 all: $(TARGET)
 
-$(TARGET): $(OBJS)
-	g++ -Wall -O2 -o $@ $^
+$(TARGET): $(OBJS) | $(BUILDDIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-%.o: %.cpp $(HPPS)
-	g++ -Wall -O2 -c -o $@ $<
+$(BUILDDIR)/%.o: $(SRCDIR)/%.cpp | $(BUILDDIR)
+	$(CXX) $(CXXFLAGS) -MMD -MP -MF $(@:.o=.d) -c -o $@ $<
 
-.PHONY: clean
+$(BUILDDIR):
+	mkdir -p $(BUILDDIR)
+
+install: $(TARGET)
+	install -d $(DESTDIR)$(BINDIR)
+	install -m 0755 $(TARGET) $(DESTDIR)$(BINDIR)/Sita
+
+uninstall:
+	rm -f $(DESTDIR)$(BINDIR)/Sita
+
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -rf $(BUILDDIR)
+
+-include $(DEPS)
