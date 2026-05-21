@@ -1,7 +1,7 @@
 opensource Sita Team Decompiler
 ===============================
 
-A decompiler for [opentext Gupta Team Developer](https://www.opentext.com/products-and-solutions/products/specialty-technologies/opentext-gupta-development-tools-databases/opentext-gupta-team-developer) applications. Reads compiled `.exe` programs and binary `.app` / `.apl` source files and writes back source-form SAL (`.apt`-shaped text, or reconstructed binary `.app` / `.apl`).
+A decompiler for [opentext Gupta Team Developer](https://community.opentext.com/portfolio/gupta-team-developer) applications. Reads compiled `.exe` programs and binary `.app` / `.apl` source files and writes back source-form SAL (`.apt`-shaped text, or reconstructed binary `.app` / `.apl`).
 
 ### Repository layout
 
@@ -62,6 +62,8 @@ build/Sita [option [option [...]]] <input>
 
 `<input>` is either a Team Developer compiled `.exe` or a `.app` / `.apl`
 source file (Sita auto-detects by scanning for the `MGDR` magic).
+In addition to decompilation, Sita is also capable of converting the
+proprietary binary format into human-readable text format.
 Decompiled SAL source is written to stdout in `.apt`-shaped form: each
 outline item carries a `.head <level> -  ` prefix, multi-line continuations
 (Application Description body, multi-line SAL strings inside code) appear
@@ -94,18 +96,18 @@ Examples:
 build/Sita app.exe > app.apt.txt
 
 # Single-file outputs (no library splitting)
-build/Sita -a recompiled.app app.exe              # binary .app
-build/Sita -t recompiled.apt app.exe              # text .apt (UTF-16+BOM+CRLF)
+build/Sita -a decompiled.app app.exe              # binary .app
+build/Sita -t decompiled.apt app.exe              # text .apt (UTF-16+BOM+CRLF)
 
 # Project mode: split out File Include: libraries into their own files
 # (resources also land in the same directory unless -r overrides)
 build/Sita -p decompiledProject app.exe           # binary main + .apl libs + resources
 build/Sita -P decompiledProject app.exe           # text main + .apl libs + resources
-ls decompiledProject/                             # → app.app + lib1.apl + close.bmp + ...
+ls decompiledProject/                             # → app.app + lib1.apl + button.bmp + ...
 
-# Decompile a .app source file (Sita reads it natively — same flags work)
+# Decode a proprietary .app format source file (Sita reads it natively — same flags work)
 build/Sita some.app
-build/Sita vtmisc.apl                             # binary .apl files are MGDR too
+build/Sita some.apl                               # binary .apl files are MGDR too
 
 # Dump embedded resources for inspection (no decompilation)
 build/Sita -r /tmp/resources app.exe
